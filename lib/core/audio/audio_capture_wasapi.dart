@@ -16,7 +16,7 @@ class WasapiAudioCapture implements AudioCapture {
   final _errors = StreamController<String>.broadcast();
 
   static const int _targetRate = 16000;
-  static const int _pollMs = 100;
+  static const int _pollMs = 60; // 提速调优：100ms → 60ms，采集更跟手
 
   Pointer<Void>? _handle;
   Timer? _timer;

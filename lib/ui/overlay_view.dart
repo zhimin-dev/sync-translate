@@ -38,7 +38,13 @@ class _OverlayViewState extends State<OverlayView> {
 
   void _onEntry(SubtitleEntry entry) {
     setState(() {
-      _entries.add(entry);
+      // 同 seq 事件 = 译文补上：原位替换；否则追加。
+      final index = _entries.indexWhere((e) => e.seq == entry.seq);
+      if (index >= 0) {
+        _entries[index] = entry;
+      } else {
+        _entries.add(entry);
+      }
       final max = widget.maxLines;
       if (_entries.length > max) {
         _entries.removeRange(0, _entries.length - max);
@@ -180,15 +186,25 @@ class _OverlayViewState extends State<OverlayView> {
                   height: 1.25,
                 ),
               ),
-              Text(
-                entry.translated,
-                style: TextStyle(
-                  color: Colors.amberAccent,
-                  fontSize: widget.fontSize,
-                  height: 1.3,
-                  fontWeight: FontWeight.w500,
+              if (entry.translated.isNotEmpty)
+                Text(
+                  entry.translated,
+                  style: TextStyle(
+                    color: Colors.amberAccent,
+                    fontSize: widget.fontSize,
+                    height: 1.3,
+                    fontWeight: FontWeight.w500,
+                  ),
+                )
+              else
+                Text(
+                  '翻译中…',
+                  style: TextStyle(
+                    color: Colors.white30,
+                    fontSize: widget.fontSize - 2,
+                    height: 1.3,
+                  ),
                 ),
-              ),
             ],
           ),
         );

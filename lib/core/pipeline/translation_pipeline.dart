@@ -9,6 +9,8 @@ import '../translate/translator.dart';
 import 'vad_segmenter.dart';
 
 /// 一条字幕：原文 + 译文。
+/// [translated] 为空串表示译文尚未返回（原文先行阶段）；
+/// 译文就绪后流水线会以相同 [seq] 再次发出本条。
 class SubtitleEntry {
   SubtitleEntry(this.seq, this.original, this.translated, this.time);
 
@@ -95,6 +97,9 @@ class TranslationPipeline {
         state.value = const PipelineState(PipelinePhase.listening);
         return;
       }
+      final seq = _seq++;
+      // 原文先行：识别完成立即上屏，译文随后以同 seq 事件补上（感知延迟大幅下降）
+      _subtitles.add(SubtitleEntry(seq, text, '', DateTime.now()));
       final sourceLang = _config.translate.sourceLang == 'auto'
           ? null
           : _config.translate.sourceLang;
@@ -104,7 +109,7 @@ class TranslationPipeline {
         targetLang: _config.translate.targetLang,
       ))
           .trim();
-      _subtitles.add(SubtitleEntry(_seq++, text, translated, DateTime.now()));
+      _subtitles.add(SubtitleEntry(seq, text, translated, DateTime.now()));
       state.value = const PipelineState(PipelinePhase.listening);
     } catch (e) {
       // 单段失败不中断采集，继续听；错误展示在状态栏。
