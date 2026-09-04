@@ -24,8 +24,10 @@ enum {
 WASAPI_CAPTURE_API int wasapi_start(int mode, void** out_handle);
 
 // Reads up to max_frames mono float32 samples into out.
-// Blocks at most ~200 ms waiting for data; writes the number of frames read
-// into *frames_read and the native sample rate into *sample_rate.
+// If out is NULL this is an info probe: only *frames_read (0) and
+// *sample_rate are written and 0 is returned.
+// Otherwise blocks at most ~200 ms waiting for data; writes the number of
+// frames read into *frames_read and the native sample rate into *sample_rate.
 // Returns 0 on success, -1 on bad arguments, -2 if the capture thread died
 // (e.g. default device removed). Check wasapi_last_error() for details.
 WASAPI_CAPTURE_API int wasapi_read(void* handle, float* out, int max_frames,

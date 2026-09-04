@@ -1,4 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 麦克风采集 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- 悬浮字幕窗 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <!-- 系统音频采集（AudioPlaybackCapture + MediaProjection）需要前台服务 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
+    <!-- Android 13+ 前台服务通知 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
     <application
         android:label="sync_translate"
         android:name="${applicationName}"

@@ -158,9 +158,10 @@ class WasapiCapture {
   }
 
   int Read(float* out, int max_frames, int* frames_read, int* sample_rate) {
-    *frames_read = 0;
-    *sample_rate = sample_rate_;
-    if (out == nullptr || max_frames <= 0) return -1;
+    if (frames_read != nullptr) *frames_read = 0;
+    if (sample_rate != nullptr) *sample_rate = sample_rate_;
+    if (out == nullptr) return 0;  // info probe (sample rate only)
+    if (max_frames <= 0 || frames_read == nullptr) return -1;
     if (!running_.load()) {
       return -2;  // capture thread died (device unplugged, etc.)
     }
