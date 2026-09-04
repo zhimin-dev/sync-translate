@@ -9,11 +9,12 @@
 
 #include "wasapi_capture.h"
 
-#include <avrt.h>
+#include <windows.h>  // 必须最先包含：avrt.h / audioclient.h 依赖其中的类型
+
 #include <audioclient.h>
+#include <avrt.h>
 #include <ksmedia.h>
 #include <mmdeviceapi.h>
-#include <windows.h>
 
 #include <atomic>
 #include <cstdio>
