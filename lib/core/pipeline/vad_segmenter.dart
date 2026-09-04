@@ -19,8 +19,10 @@ class VadSegmenter {
   VadSegmenter({
     this.frameMs = 30,
     this.silenceThreshold = 0.008,
-    this.silenceToCutMs = 650,
-    this.minSpeechMs = 450,
+    // 提速调优：静音 450ms 即切句（原 650ms），最短语音 300ms（原 450ms），
+    // 让每句更早上屏；句子切得稍碎可换来约 0.5~1s 的实时性提升。
+    this.silenceToCutMs = 450,
+    this.minSpeechMs = 300,
     this.maxSegmentMs = 8000,
   });
 
