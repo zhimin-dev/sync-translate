@@ -52,10 +52,12 @@ flutter build windows --release
 #### 方案 A：本地模型（推荐，免 Key、数据不出本机、GPU 加速）
 
 ```powershell
-# 首次：安装依赖（需要 Python 3.9–3.12）
+# 首次：安装依赖（需要 Python 3.11 标准版；Anaconda 自带的旧版 ucrtbase 会导致 torch 加载失败）
 powershell -ExecutionPolicy Bypass -File tool\local_servers\setup.ps1
+# （setup 会顺便下载两个模型：faster-whisper-large-v3-turbo ~1.5GB + NLLB-200 600M ~2.4GB，
+#   下载支持断点续传，也可以手动执行 download_models.ps1）
 
-# 开两个终端分别启动服务（模型首次启动自动下载，走 hf-mirror 镜像）
+# 开两个终端分别启动服务
 powershell -ExecutionPolicy Bypass -File tool\local_servers\start_whisper.ps1   # STT    http://127.0.0.1:8000/v1
 powershell -ExecutionPolicy Bypass -File tool\local_servers\start_nllb.ps1     # 翻译   http://127.0.0.1:8765
 ```
@@ -63,8 +65,10 @@ powershell -ExecutionPolicy Bypass -File tool\local_servers\start_nllb.ps1     #
 应用里选择：STT 引擎「本地 Whisper（faster-whisper，免 Key）」、翻译引擎「本地 NLLB-200（免 Key）」
 （切换到本地引擎时会自动填默认地址），然后点 **开始监听**。
 
-有 NVIDIA 显卡时速度极快；纯 CPU 也能跑（略慢）。识别模型默认 `faster-whisper-large-v3-turbo`，
-可编辑 `start_whisper.ps1` 换成 `small`/`medium`（更快但准确率略降）。
+- STT：faster-whisper（CTranslate2，RTX 4060 Ti 实测 6 秒音频约 1 秒识别）
+- 翻译：官方 facebook/nllb-200-distilled-600M（PyTorch + transformers，CUDA，亚秒级）
+- 链路自检：`venv\Scripts\python.exe tool\local_servers\test_chain.py`
+- 纯 CPU 也能跑（略慢）。识别模型可编辑 `start_whisper.ps1` 换成 small/medium
 
 #### 方案 B：云端引擎
 

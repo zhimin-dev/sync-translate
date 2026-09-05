@@ -93,10 +93,15 @@ abstract class Translator {
 |---|---|---|
 | `whisper_local` STT | 本地 | 连接本机 faster-whisper 服务（`tool/local_servers/whisper_server.py`，GPU 加速，免 Key） |
 | `openai_compat` STT | 云端 | `POST {baseUrl}/audio/transcriptions`，兼容 OpenAI/Groq/SiliconFlow 等 |
-| `nllb_local` 翻译 | 本地 | 连接本机 NLLB-200 服务（`tool/local_servers/nllb_server.py`，CTranslate2，免 Key） |
+| `nllb_local` 翻译 | 本地 | 连接本机 NLLB-200 服务（`tool/local_servers/nllb_server.py`，PyTorch + transformers，免 Key） |
 | `llm` 翻译 | 云端/本地 | `POST {baseUrl}/chat/completions`；baseUrl 指向 `http://localhost:11434/v1` 即 Ollama 本地模型 |
 
-本地服务为轻量 HTTP 服务（FastAPI + CTranslate2），模型经 hf-mirror 下载，优先 CUDA、自动回退 CPU；数据不出本机。
+本地服务为轻量 HTTP 服务，模型经 hf-mirror 下载（`download_models.ps1` 支持断点续传），优先 CUDA、自动回退 CPU；数据不出本机。
+
+> ⚠️ 实测备注：NLLB 在 CTranslate2 运行时（4.5.0/4.6.0 × 多组社区/官方 CT2 转换）于本机均出现解码退化（token 循环重复），
+> 故翻译服务改用 **PyTorch + transformers 官方模型**（facebook/nllb-200-distilled-600M），输出质量正常。
+> STT 侧 faster-whisper（CTranslate2）无此问题。此外本机 Anaconda 自带的 2018 年版 ucrtbase.dll
+> 会导致 torch 加载失败（WinError 1114），因此安装脚本优先使用标准版 Python 3.11。
 
 选择"混合"策略的原因：云端实时性最好；本地引擎可通过同一套 OpenAI 兼容协议（Ollama/LM Studio/whisper.cpp server）先行接入，无需另写原生绑定。
 

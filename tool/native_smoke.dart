@@ -50,7 +50,7 @@ void main(List<String> args) {
 
   final outHandle = calloc<Pointer<Void>>();
   var rc = start(0, outHandle);
-  stdout.writeln('start rc=$rc err=${lastError()}');
+  stdout.writeln('start rc=$rc err=${lastError().toDartString()}');
   if (rc != 0) {
     exit(1);
   }

@@ -137,7 +137,7 @@ class _SettingsViewState extends State<SettingsView> {
           !_trBaseUrl.text.contains('localhost') &&
           !_trBaseUrl.text.contains('127.0.0.1')) {
         _trBaseUrl.text = 'http://127.0.0.1:8765';
-        _trModel.text = 'JustFrederik/nllb-200-distilled-600M-ct2-int8';
+        _trModel.text = 'facebook/nllb-200-distilled-600M';
         _trApiKey.text = '';
       }
     });

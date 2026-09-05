@@ -79,12 +79,32 @@ class WasapiCapture {
     const EDataFlow flow = (mode_ == WASAPI_MODE_SYSTEM) ? eRender : eCapture;
     hr = enumerator_->GetDefaultAudioEndpoint(flow, eConsole, &device_);
     if (FAILED(hr)) {
+      // 默认端点不可用（例如被拔出/禁用）时，回退到任一活动设备
       std::string msg = (mode_ == WASAPI_MODE_SYSTEM)
                             ? "GetDefaultAudioEndpoint(eRender) failed: "
                             : "GetDefaultAudioEndpoint(eCapture) failed: ";
-      set_error(msg + hresult_to_string(hr));
-      CleanupCom();
-      return -3;
+      IMMDeviceCollection* collection = nullptr;
+      hr = enumerator_->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE,
+                                           &collection);
+      if (SUCCEEDED(hr)) {
+        UINT count = 0;
+        collection->GetCount(&count);
+        if (count > 0) {
+          hr = collection->Item(0, &device_);
+          msg += hresult_to_string(hr) + "；已回退到活动设备（共 " +
+                 std::to_string(count) + " 个）";
+        } else {
+          hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+          msg += hresult_to_string(hr) + "；且无任何活动设备";
+        }
+        collection->Release();
+      }
+      if (FAILED(hr)) {
+        set_error(msg);
+        CleanupCom();
+        return -3;
+      }
+      set_error(msg);  // 回退成功，记录提示
     }
 
     hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
