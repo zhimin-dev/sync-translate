@@ -114,6 +114,35 @@ class _SettingsViewState extends State<SettingsView> {
     }
   }
 
+  void _onSttEngineChanged(String? v) {
+    if (v == null) return;
+    setState(() {
+      _sttEngine = v;
+      if (v == 'whisper_local' &&
+          !_sttBaseUrl.text.contains('localhost') &&
+          !_sttBaseUrl.text.contains('127.0.0.1')) {
+        // 切到本地引擎时自动填默认服务地址（免 Key）
+        _sttBaseUrl.text = 'http://127.0.0.1:8000/v1';
+        _sttModel.text = 'deepdml/faster-whisper-large-v3-turbo-ct2';
+        _sttApiKey.text = '';
+      }
+    });
+  }
+
+  void _onTrEngineChanged(String? v) {
+    if (v == null) return;
+    setState(() {
+      _trEngine = v;
+      if (v == 'nllb_local' &&
+          !_trBaseUrl.text.contains('localhost') &&
+          !_trBaseUrl.text.contains('127.0.0.1')) {
+        _trBaseUrl.text = 'http://127.0.0.1:8765';
+        _trModel.text = 'nllb-200-distilled-600M';
+        _trApiKey.text = '';
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -154,9 +183,9 @@ class _SettingsViewState extends State<SettingsView> {
                     value: _sttEngine,
                     items: const {
                       'openai_compat': 'OpenAI 兼容接口（云端）',
-                      'whisper_local': '本地 Whisper（尚未实现）',
+                      'whisper_local': '本地 Whisper（faster-whisper，免 Key）',
                     },
-                    onChanged: (v) => setState(() => _sttEngine = v!),
+                    onChanged: _onSttEngineChanged,
                   ),
                   const SizedBox(height: 8),
                   _buildTextFormField(
@@ -189,7 +218,7 @@ class _SettingsViewState extends State<SettingsView> {
                   _buildTextFormField(
                     controller: _sttModel,
                     label: '模型',
-                    hint: 'whisper-large-v3-turbo（Groq）/ whisper-1（OpenAI）',
+                    hint: '云端：whisper-large-v3-turbo；本地：deepdml/faster-whisper-large-v3-turbo-ct2',
                   ),
                   const SizedBox(height: 8),
                   _languageDropdown(
@@ -203,9 +232,9 @@ class _SettingsViewState extends State<SettingsView> {
                     value: _trEngine,
                     items: const {
                       'llm': 'LLM（OpenAI 兼容接口）',
-                      'nllb_local': '本地 NLLB（尚未实现）',
+                      'nllb_local': '本地 NLLB-200（免 Key）',
                     },
-                    onChanged: (v) => setState(() => _trEngine = v!),
+                    onChanged: _onTrEngineChanged,
                   ),
                   const SizedBox(height: 8),
                   _buildTextFormField(
@@ -332,9 +361,9 @@ class _SettingsViewState extends State<SettingsView> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    '提示：Groq 提供免费的 Whisper 快速转写；'
-                    '本地模型可用 whisper.cpp server / Ollama 的 OpenAI 兼容接口，'
-                    '把对应 Base URL 指向本机即可。',
+                    '提示：本地引擎（faster-whisper / NLLB-200）需先启动服务，'
+                    '脚本位于 tool\\local_servers\\（start_whisper.ps1 / start_nllb.ps1），'
+                    '免 API Key、数据不出本机。云端引擎可用 Groq/SiliconFlow/DeepSeek 等。',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],

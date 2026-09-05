@@ -4,16 +4,16 @@
 
 - **平台**：Windows（✅ MVP 可用）/ Android、macOS（工程骨架与采集接口已预留）
 - **框架**：Flutter 3.47 + 少量平台原生代码
-- **架构**：STT 与翻译引擎可插拔（云端优先，本地引擎接口预留）
+- **架构**：STT 与翻译引擎可插拔（云端 / 本地均可，本地免 API Key）
 
 ## 功能
 
 - 系统声音采集：Windows WASAPI 回环（loopback），**无需任何权限**
 - 麦克风采集：Windows WASAPI eCapture（首次使用触发系统麦克风授权）
-- 实时分段：短时能量 VAD，静音自动切句
-- 语音识别：OpenAI 兼容 `/audio/transcriptions`（OpenAI / Groq / SiliconFlow / whisper.cpp server…）
-- 翻译：OpenAI 兼容 `/chat/completions`（DeepSeek / OpenAI / Ollama 本地模型…）
-- 悬浮字幕：置顶、半透明、可拖动、原文+译文双行、保留最近 N 条
+- 实时分段：短时能量 VAD，静音自动切句（提速调优：静音 450ms 切句 / 最短 300ms）
+- 语音识别（可插拔）：**本地 faster-whisper（GPU 加速，免 Key）** / OpenAI 兼容接口（OpenAI / Groq / SiliconFlow…）
+- 翻译（可插拔）：**本地 NLLB-200（免 Key）** / LLM（DeepSeek / OpenAI / Ollama…）
+- 悬浮字幕：置顶、半透明、可拖动、**原文先行上屏**、译文随后补上、保留最近 N 条
 - 配置持久化：应用数据目录 `config.json`
 
 ## 快速开始（Windows）
@@ -49,17 +49,33 @@ flutter build windows --release
 
 ### 3. 配置引擎
 
+#### 方案 A：本地模型（推荐，免 Key、数据不出本机、GPU 加速）
+
+```powershell
+# 首次：安装依赖（需要 Python 3.9–3.12）
+powershell -ExecutionPolicy Bypass -File tool\local_servers\setup.ps1
+
+# 开两个终端分别启动服务（模型首次启动自动下载，走 hf-mirror 镜像）
+powershell -ExecutionPolicy Bypass -File tool\local_servers\start_whisper.ps1   # STT    http://127.0.0.1:8000/v1
+powershell -ExecutionPolicy Bypass -File tool\local_servers\start_nllb.ps1     # 翻译   http://127.0.0.1:8765
+```
+
+应用里选择：STT 引擎「本地 Whisper（faster-whisper，免 Key）」、翻译引擎「本地 NLLB-200（免 Key）」
+（切换到本地引擎时会自动填默认地址），然后点 **开始监听**。
+
+有 NVIDIA 显卡时速度极快；纯 CPU 也能跑（略慢）。识别模型默认 `faster-whisper-large-v3-turbo`，
+可编辑 `start_whisper.ps1` 换成 `small`/`medium`（更快但准确率略降）。
+
+#### 方案 B：云端引擎
+
 首次启动在设置页填写：
 
 | 引擎 | 服务商示例 | Base URL | 模型示例 |
 |---|---|---|---|
 | STT | Groq（免费额度，速度快） | `https://api.groq.com/openai/v1` | `whisper-large-v3-turbo` |
-| STT | OpenAI | `https://api.openai.com/v1` | `whisper-1` / `gpt-4o-transcribe` |
 | STT | SiliconFlow（国内） | `https://api.siliconflow.cn/v1` | `FunAudioLLM/SenseVoiceSmall` |
-| STT | whisper.cpp server（本地） | `http://localhost:8080/v1` | `whisper-1` |
 | 翻译 | DeepSeek（国内） | `https://api.deepseek.com/v1` | `deepseek-chat` |
-| 翻译 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
-| 翻译 | Ollama（本地） | `http://localhost:11434/v1` | `qwen2.5:7b` 等 |
+| 翻译 | SiliconFlow（国内） | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V3` |
 
 点击 **开始监听**，窗口自动切换为悬浮字幕形态（置顶半透明，Esc 返回设置）。
 

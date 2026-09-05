@@ -91,10 +91,12 @@ abstract class Translator {
 
 | 引擎 | 类型 | 说明 |
 |---|---|---|
-| `openai_compat` STT | 云端 | `POST {baseUrl}/audio/transcriptions`，兼容 OpenAI/Groq/SiliconFlow/DeepInfra 等 |
+| `whisper_local` STT | 本地 | 连接本机 faster-whisper 服务（`tool/local_servers/whisper_server.py`，GPU 加速，免 Key） |
+| `openai_compat` STT | 云端 | `POST {baseUrl}/audio/transcriptions`，兼容 OpenAI/Groq/SiliconFlow 等 |
+| `nllb_local` 翻译 | 本地 | 连接本机 NLLB-200 服务（`tool/local_servers/nllb_server.py`，CTranslate2，免 Key） |
 | `llm` 翻译 | 云端/本地 | `POST {baseUrl}/chat/completions`；baseUrl 指向 `http://localhost:11434/v1` 即 Ollama 本地模型 |
-| `whisper_local` STT | 本地 | 接口已预留，计划 whisper.cpp + FFI |
-| `nllb_local` 翻译 | 本地 | 接口已预留，计划 CT2/NLLB + FFI |
+
+本地服务为轻量 HTTP 服务（FastAPI + CTranslate2），模型经 hf-mirror 下载，优先 CUDA、自动回退 CPU；数据不出本机。
 
 选择"混合"策略的原因：云端实时性最好；本地引擎可通过同一套 OpenAI 兼容协议（Ollama/LM Studio/whisper.cpp server）先行接入，无需另写原生绑定。
 
