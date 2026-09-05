@@ -15,13 +15,22 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
+# 注册 NVIDIA cuDNN/cuBLAS 运行库路径（ctranslate2 GPU 推理依赖）
+_NVIDIA_BASE = Path(__file__).resolve().parent / "venv" / "Lib" / "site-packages" / "nvidia"
+for _dll_dir in (_NVIDIA_BASE / "cudnn" / "bin", _NVIDIA_BASE / "cublas" / "bin"):
+    if _dll_dir.is_dir():
+        os.add_dll_directory(str(_dll_dir))
 
 import numpy as np  # noqa: E402
 import uvicorn  # noqa: E402
 from fastapi import FastAPI, File, Form, UploadFile  # noqa: E402
 from faster_whisper import WhisperModel  # noqa: E402
+
+MODELS_ROOT = Path(__file__).resolve().parent / "models"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("whisper-server")
@@ -33,6 +42,10 @@ _device_name = "not-loaded"
 
 def load_model(model_name: str, device: str, compute_type: str) -> None:
     global _model, _device_name
+    # 优先用本地模型目录（download_models.ps1 下载），否则走 HF 仓库（hf-mirror）
+    local_dir = MODELS_ROOT / Path(model_name).name
+    src = str(local_dir) if local_dir.is_dir() else model_name
+    log.info("加载 whisper 模型: %s", src)
     if device == "auto":
         try:
             import ctranslate2  # noqa: F401
@@ -40,15 +53,15 @@ def load_model(model_name: str, device: str, compute_type: str) -> None:
         except Exception:
             device = "cpu"
     try:
-        _model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        _model = WhisperModel(src, device=device, compute_type=compute_type)
         _device_name = device
         log.info("whisper 模型已加载: %s，设备=%s，compute_type=%s",
-                 model_name, device, compute_type)
+                 src, device, compute_type)
     except Exception as exc:
         log.warning("GPU 初始化失败（%s），回退 CPU", exc)
-        _model = WhisperModel(model_name, device="cpu", compute_type="int8")
+        _model = WhisperModel(src, device="cpu", compute_type="int8")
         _device_name = "cpu"
-        log.info("whisper 模型已加载（CPU 回退）: %s", model_name)
+        log.info("whisper 模型已加载（CPU 回退）: %s", src)
 
 
 @app.get("/health")
