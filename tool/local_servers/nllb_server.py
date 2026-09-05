@@ -15,6 +15,7 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
@@ -24,6 +25,8 @@ import uvicorn  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from huggingface_hub import hf_hub_download  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
+
+MODELS_ROOT = Path(__file__).resolve().parent / "models"
 
 # ISO 639-1 -> NLLB flores200 代码（应用层语言码）
 LANG_MAP = {
@@ -63,22 +66,29 @@ class TranslateResponse(BaseModel):
 
 def load_model(model_name: str, device: str, compute_type: str) -> None:
     global _translator, _sp, _device_name
-    repo = f"facebook/{model_name}"
-    log.info("下载/加载 tokenizer: %s", repo)
-    spm_path = hf_hub_download(repo_id=repo, filename="sentencepiece.bpe.model")
+    # 社区预转换的 CTranslate2 版 NLLB（官方仓库只有 pytorch_model.bin）
+    repo = (model_name if "/" in model_name
+            else f"facebook/{model_name}")
+    model_dir = MODELS_ROOT / repo.replace("/", "--")
+    log.info("下载模型到 %s（首次需要几分钟）: %s", model_dir, repo)
+    spm_path = hf_hub_download(repo_id=repo, filename="sentencepiece.bpe.model",
+                               local_dir=str(model_dir))
+    hf_hub_download(repo_id=repo, filename="model.bin", local_dir=str(model_dir))
     _sp = spm.SentencePieceProcessor(model_file=spm_path)
 
     if device == "auto":
         device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
 
     try:
-        _translator = ctranslate2.Translator(repo, device=device, compute_type=compute_type)
+        _translator = ctranslate2.Translator(str(model_dir), device=device,
+                                             compute_type=compute_type)
         _device_name = _translator.device
         log.info("NLLB 模型已加载: %s，设备=%s，compute_type=%s",
                  repo, _translator.device, _translator.compute_type)
     except Exception as exc:  # GPU 初始化失败时回退 CPU
         log.warning("GPU 初始化失败（%s），回退 CPU", exc)
-        _translator = ctranslate2.Translator(repo, device="cpu", compute_type="int8")
+        _translator = ctranslate2.Translator(str(model_dir), device="cpu",
+                                             compute_type="int8")
         _device_name = _translator.device
         log.info("NLLB 模型已加载（CPU 回退）: %s", repo)
 
@@ -118,8 +128,8 @@ def translate(req: TranslateRequest) -> TranslateResponse:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="NLLB-200 local translation server")
-    parser.add_argument("--model", default="nllb-200-distilled-600M",
-                        help="HF 模型名（facebook/ 前缀可省略）")
+    parser.add_argument("--model", default="JustFrederik/nllb-200-distilled-600M-ct2-int8",
+                        help="HF 模型名（CT2 格式，可省略 facebook/ 前缀）")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
     parser.add_argument("--compute-type", default="int8_float16",
