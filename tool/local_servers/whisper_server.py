@@ -70,15 +70,17 @@ def health() -> dict:
 
 
 @app.post("/v1/audio/transcriptions")
-async def transcribe(
+def transcribe(
     file: UploadFile = File(...),
     model: str = Form(""),
     language: str = Form(""),
     response_format: str = Form("json"),
 ) -> dict:
+    # 注意：同步端点（FastAPI 放入线程池执行），
+    # 让"边听边出"的部分识别与最终识别可以并发处理。
     if _model is None:
         return {"error": "model not loaded"}
-    raw = await file.read()
+    raw = file.file.read()
     # 应用端固定上传 16kHz 单声道 PCM16 WAV
     try:
         audio = np.frombuffer(raw[44:], dtype=np.int16).astype(np.float32) / 32768.0

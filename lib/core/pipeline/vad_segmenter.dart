@@ -13,8 +13,19 @@ class SpeechSegment {
   final int endMs;
 }
 
-/// 基于短时能量的 VAD 分段器（MVP）。
-/// 输入 16kHz 单声道 float32 块流，按静音切分为语音段。
+/// 说话过程中的滚动窗口部分结果（边听边出，用于临时字幕）。
+class SpeechPartial {
+  SpeechPartial(this.pcm16k, this.startMs, this.endMs);
+
+  final Float32List pcm16k;
+  final int startMs;
+  final int endMs;
+}
+
+/// 基于短时能量的 VAD 分段器。
+/// 输入 16kHz 单声道 float32 块流：
+/// - [segments]：按静音切分的完整语音段（最终字幕用）
+/// - [partials]：说话过程中周期性发出的当前语音窗口快照（实时字幕用）
 class VadSegmenter {
   VadSegmenter({
     this.frameMs = 30,
@@ -24,6 +35,9 @@ class VadSegmenter {
     this.silenceToCutMs = 450,
     this.minSpeechMs = 300,
     this.maxSegmentMs = 8000,
+    // 部分结果（实时字幕）：语音满 1200ms 后每 800ms 发一次窗口快照
+    this.partialMinSpeechMs = 1200,
+    this.partialIntervalMs = 800,
   });
 
   /// 帧长（毫秒）。
@@ -41,14 +55,24 @@ class VadSegmenter {
   /// 最长语音段时长，强制切段（避免超长请求）。
   final int maxSegmentMs;
 
+  /// 语音持续至少该时长后才开始发部分结果。
+  final int partialMinSpeechMs;
+
+  /// 部分结果的最小间隔。
+  final int partialIntervalMs;
+
   static const int _sampleRate = 16000;
 
   final _segments = StreamController<SpeechSegment>.broadcast();
   Stream<SpeechSegment> get segments => _segments.stream;
 
+  final _partials = StreamController<SpeechPartial>.broadcast();
+  Stream<SpeechPartial> get partials => _partials.stream;
+
   final List<double> _buffer = [];
   int _speechStartMs = -1;
   int _silenceMs = 0;
+  int _lastPartialEndMs = -1;
 
   void add(AudioChunk chunk) {
     final pcm = chunk.pcm16k;
@@ -71,6 +95,7 @@ class VadSegmenter {
       if (voiced) {
         _speechStartMs = tMs;
         _silenceMs = 0;
+        _lastPartialEndMs = -1;
         _buffer.clear();
         _buffer.addAll(pcm.sublist(start, end));
       }
@@ -79,6 +104,18 @@ class VadSegmenter {
     _buffer.addAll(pcm.sublist(start, end));
     if (voiced) {
       _silenceMs = 0;
+      // 边听边出：当前语音窗口快照
+      final nowMs = tMs + frameMs;
+      final speechLenMs = nowMs - _speechStartMs;
+      if (speechLenMs >= partialMinSpeechMs &&
+          nowMs - _lastPartialEndMs >= partialIntervalMs) {
+        _lastPartialEndMs = nowMs;
+        final snapshot = Float32List(_buffer.length);
+        for (var i = 0; i < _buffer.length; i++) {
+          snapshot[i] = _buffer[i];
+        }
+        _partials.add(SpeechPartial(snapshot, _speechStartMs, nowMs));
+      }
     } else {
       _silenceMs += frameMs;
     }
@@ -108,6 +145,7 @@ class VadSegmenter {
     _buffer.clear();
     _speechStartMs = -1;
     _silenceMs = 0;
+    _lastPartialEndMs = -1;
   }
 
   /// 停止采集前调用，把未切段的语音作为最后一段发出。
@@ -117,7 +155,10 @@ class VadSegmenter {
     }
   }
 
-  Future<void> dispose() => _segments.close();
+  Future<void> dispose() async {
+    await _segments.close();
+    await _partials.close();
+  }
 
   static double _rms(Float32List pcm, int start, int end) {
     if (end <= start) return 0;

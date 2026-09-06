@@ -89,4 +89,47 @@ void main() {
     await seg.dispose();
     expect(segments, isEmpty);
   });
+
+  test('说话过程中周期性发出部分结果（边听边出）', () async {
+    final seg = VadSegmenter(
+      silenceThreshold: 0.05,
+      silenceToCutMs: 600,
+      partialMinSpeechMs: 500,
+      partialIntervalMs: 300,
+    );
+    final partials = <SpeechPartial>[];
+    seg.partials.listen(partials.add);
+    var t = 0;
+    // 连续 3000ms 语音（分块喂入模拟实时流）
+    for (var i = 0; i < 10; i++) {
+      seg.add(AudioChunk(makeAudio(ms: 300, voiced: true), t));
+      t += 300;
+    }
+    seg.add(AudioChunk(makeAudio(ms: 900, voiced: false), t));
+    await seg.dispose();
+
+    expect(partials, isNotEmpty);
+    // 第一个部分结果在语音满 500ms 后
+    expect(partials.first.startMs, 0);
+    expect(partials.first.endMs - partials.first.startMs,
+        greaterThanOrEqualTo(500));
+    // 部分结果时间递增、音频逐步变长
+    for (var i = 1; i < partials.length; i++) {
+      expect(partials[i].endMs, greaterThanOrEqualTo(partials[i - 1].endMs));
+      expect(partials[i].pcm16k.length, greaterThan(partials[i - 1].pcm16k.length));
+    }
+  });
+
+  test('纯静音不产生部分结果', () async {
+    final seg = VadSegmenter(
+      silenceThreshold: 0.05,
+      partialMinSpeechMs: 500,
+      partialIntervalMs: 300,
+    );
+    final partials = <SpeechPartial>[];
+    seg.partials.listen(partials.add);
+    seg.add(AudioChunk(makeAudio(ms: 3000, voiced: false), 0));
+    await seg.dispose();
+    expect(partials, isEmpty);
+  });
 }

@@ -38,11 +38,19 @@ class _OverlayViewState extends State<OverlayView> {
 
   void _onEntry(SubtitleEntry entry) {
     setState(() {
-      // 同 seq 事件 = 译文补上：原位替换；否则追加。
-      final index = _entries.indexWhere((e) => e.seq == entry.seq);
+      if (entry.seq == SubtitleEntry.provisionalSeq) {
+        // 临时字幕（边听边出）：替换上一条临时字幕
+        _entries.removeWhere((e) => e.seq == SubtitleEntry.provisionalSeq);
+        _entries.add(entry);
+        return;
+      }
+      // 最终字幕：同 seq 事件 = 译文补上，原位替换；同时清掉临时字幕
+      final index = _entries.indexWhere(
+          (e) => e.seq == entry.seq && e.seq != SubtitleEntry.provisionalSeq);
       if (index >= 0) {
         _entries[index] = entry;
       } else {
+        _entries.removeWhere((e) => e.seq == SubtitleEntry.provisionalSeq);
         _entries.add(entry);
       }
       final max = widget.maxLines;
@@ -173,6 +181,7 @@ class _OverlayViewState extends State<OverlayView> {
       itemCount: reversed.length,
       itemBuilder: (context, index) {
         final entry = reversed[index];
+        final finalStyle = entry.isFinal;
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 3),
           child: Column(
@@ -181,16 +190,19 @@ class _OverlayViewState extends State<OverlayView> {
               Text(
                 entry.original,
                 style: TextStyle(
-                  color: Colors.white,
+                  color: finalStyle ? Colors.white : Colors.white70,
                   fontSize: widget.fontSize,
                   height: 1.25,
+                  fontStyle: finalStyle ? FontStyle.normal : FontStyle.italic,
                 ),
               ),
               if (entry.translated.isNotEmpty)
                 Text(
                   entry.translated,
                   style: TextStyle(
-                    color: Colors.amberAccent,
+                    color: finalStyle
+                        ? Colors.amberAccent
+                        : const Color(0xCCFFD54F),
                     fontSize: widget.fontSize,
                     height: 1.3,
                     fontWeight: FontWeight.w500,
@@ -198,7 +210,7 @@ class _OverlayViewState extends State<OverlayView> {
                 )
               else
                 Text(
-                  '翻译中…',
+                  finalStyle ? '翻译中…' : '…',
                   style: TextStyle(
                     color: Colors.white30,
                     fontSize: widget.fontSize - 2,
