@@ -12,6 +12,12 @@ class _AppTrayListener with TrayListener {
   void onTrayIconMouseDown() => onShow();
 
   @override
+  void onTrayIconRightMouseDown() {
+    // 该插件不会自动弹出菜单，需在右键事件里手动触发
+    trayManager.popUpContextMenu();
+  }
+
+  @override
   void onTrayMenuItemClick(MenuItem menuItem) {
     switch (menuItem.key) {
       case 'show':
