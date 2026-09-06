@@ -53,10 +53,23 @@ if ($LASTEXITCODE -ne 0) {
 }
 & $venvPy -m pip install transformers -i $index
 
-# cuDNN/cuBLAS 运行库复制到 ctranslate2 包目录（其加载器只搜索自身目录）
+# cuDNN 运行库必须与 torch 自带版本一致（9.10.2.21），否则 ctranslate2 与 torch
+# 同进程加载时同名 DLL 版本冲突（WinError 127）；复制到 ctranslate2 包目录
+# （其加载器只搜索自身目录）。版本取自 torch 安装后的实际文件，用脚本对齐：
+Write-Host '== 对齐 cuDNN 版本（torch 与 ctranslate2 共用同一份）=='
+$torchCudnn = Join-Path $venvDir 'Lib\site-packages\torch\lib\cudnn64_9.dll'
 $ct2Dir = Join-Path $venvDir 'Lib\site-packages\ctranslate2'
-Copy-Item (Join-Path $venvDir 'Lib\site-packages\nvidia\cudnn\bin\*.dll') $ct2Dir -Force
-Copy-Item (Join-Path $venvDir 'Lib\site-packages\nvidia\cublas\bin\*.dll') $ct2Dir -Force
+if (Test-Path $torchCudnn) {
+    $ver = (Get-Item $torchCudnn).VersionInfo.FileVersion
+    & $venvPy -m pip install "nvidia-cudnn-cu12==$ver" -i $index
+    Get-ChildItem $ct2Dir -Filter 'cudnn*' -ErrorAction SilentlyContinue | Remove-Item -Force
+    Copy-Item (Join-Path $venvDir 'Lib\site-packages\nvidia\cudnn\bin\*.dll') $ct2Dir -Force
+    Copy-Item (Join-Path $venvDir 'Lib\site-packages\nvidia\cublas\bin\*.dll') $ct2Dir -Force
+    Write-Host "  cuDNN $ver 已对齐"
+} else {
+    Copy-Item (Join-Path $venvDir 'Lib\site-packages\nvidia\cudnn\bin\*.dll') $ct2Dir -Force
+    Copy-Item (Join-Path $venvDir 'Lib\site-packages\nvidia\cublas\bin\*.dll') $ct2Dir -Force
+}
 
 Write-Host ''
 Write-Host '完成！模型会在首次启动服务时自动下载（走 hf-mirror 镜像）。'
