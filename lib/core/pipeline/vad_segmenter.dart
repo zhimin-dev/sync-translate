@@ -29,7 +29,9 @@ class SpeechPartial {
 class VadSegmenter {
   VadSegmenter({
     this.frameMs = 30,
-    this.silenceThreshold = 0.008,
+    // 静音阈值：低于视为静音。0.004 适配较低的系统音量（如 PotPlayer 默认音量）；
+    // 若背景噪声大导致误触发，可适当调高。
+    this.silenceThreshold = 0.004,
     // 提速调优：静音 450ms 即切句（原 650ms），最短语音 300ms（原 450ms），
     // 让每句更早上屏；句子切得稍碎可换来约 0.5~1s 的实时性提升。
     this.silenceToCutMs = 450,
@@ -74,6 +76,27 @@ class VadSegmenter {
   int _silenceMs = 0;
   int _lastPartialEndMs = -1;
 
+  // 自适应阈值：跟踪背景噪声底，动态阈值 = max(阈值下限, 噪声底×3 + 0.0003)
+  double _noiseFloor = 0.0;
+
+  /// 计算当前有效判定阈值（自适应背景噪声）。
+  double _effectiveThreshold() {
+    final floor = silenceThreshold * 0.35;
+    final adaptive = _noiseFloor * 3 + 0.0003;
+    return math.max(floor, adaptive);
+  }
+
+  /// 更新噪声底（仅用"当前被判为静音"的帧，缓慢下移）。
+  void _updateNoiseFloor(double rms) {
+    if (_noiseFloor <= 0) {
+      _noiseFloor = rms;
+    } else if (rms < _noiseFloor) {
+      _noiseFloor = _noiseFloor * 0.9 + rms * 0.1;
+    } else {
+      _noiseFloor = _noiseFloor * 0.995 + rms * 0.005;
+    }
+  }
+
   void add(AudioChunk chunk) {
     final pcm = chunk.pcm16k;
     final frameLen = _sampleRate * frameMs ~/ 1000;
@@ -90,7 +113,7 @@ class VadSegmenter {
 
   void _processFrame(
       double rms, Float32List pcm, int start, int end, int tMs) {
-    final voiced = rms >= silenceThreshold;
+    final voiced = rms >= _effectiveThreshold();
     if (_speechStartMs < 0) {
       if (voiced) {
         _speechStartMs = tMs;
@@ -98,6 +121,9 @@ class VadSegmenter {
         _lastPartialEndMs = -1;
         _buffer.clear();
         _buffer.addAll(pcm.sublist(start, end));
+      } else {
+        // 仅用非语音帧估计背景噪声底
+        _updateNoiseFloor(rms);
       }
       return;
     }
