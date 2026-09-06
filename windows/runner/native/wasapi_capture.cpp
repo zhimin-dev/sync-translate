@@ -468,6 +468,29 @@ void wasapi_free_string(const char* s) {
   (void)s;  // 内部静态存储，无需释放
 }
 
+int st_spawn_hidden(const char* cmdline) {
+  if (cmdline == nullptr || cmdline[0] == '\0') return 0;
+  STARTUPINFOA si;
+  PROCESS_INFORMATION pi;
+  ZeroMemory(&si, sizeof(si));
+  si.cb = sizeof(si);
+  ZeroMemory(&pi, sizeof(pi));
+  // CreateProcessA 需要可写命令行缓冲
+  std::string cmd(cmdline);
+  std::vector<char> buf(cmd.begin(), cmd.end());
+  buf.push_back('\0');
+  const DWORD flags = CREATE_NO_WINDOW | DETACHED_PROCESS;
+  if (!CreateProcessA(nullptr, buf.data(), nullptr, nullptr, FALSE, flags,
+                      nullptr, nullptr, &si, &pi)) {
+    set_error("CreateProcessA failed: " +
+              hresult_to_string(HRESULT_FROM_WIN32(GetLastError())));
+    return 0;
+  }
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  return static_cast<int>(pi.dwProcessId);
+}
+
 int wasapi_read(void* handle, float* out, int max_frames, int* frames_read,
                 int* sample_rate) {
   if (handle == nullptr) return -1;

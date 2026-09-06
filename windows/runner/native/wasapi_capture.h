@@ -55,6 +55,12 @@ WASAPI_CAPTURE_API void wasapi_stop(void* handle);
 // Valid until the next error occurs; copy it immediately.
 WASAPI_CAPTURE_API const char* wasapi_last_error(void);
 
+// Spawns a hidden background process from a full command line
+// (CREATE_NO_WINDOW | DETACHED_PROCESS). Returns the new process id (> 0),
+// or 0 on failure (see wasapi_last_error). Used to auto-start the local
+// model servers from the app.
+WASAPI_CAPTURE_API int st_spawn_hidden(const char* cmdline);
+
 #ifdef __cplusplus
 }
 #endif

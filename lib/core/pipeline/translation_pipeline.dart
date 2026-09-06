@@ -6,6 +6,7 @@ import '../audio/audio_capture.dart';
 import '../config/app_config.dart';
 import '../stt/stt_engine.dart';
 import '../translate/translator.dart';
+import 'local_server_manager.dart';
 import 'vad_segmenter.dart';
 
 /// 一条字幕：原文 + 译文。
@@ -80,6 +81,9 @@ class TranslationPipeline {
     }
     state.value = const PipelineState(PipelinePhase.starting);
     try {
+      // 本地引擎：自动拉起/复用本地模型服务
+      await _ensureLocalServers();
+
       await _stt.init(_config.stt);
       await _translator.init(_config.translate);
 
@@ -109,6 +113,36 @@ class TranslationPipeline {
 
   String? get _sttLanguage {
     return _config.stt.language == 'auto' ? null : _config.stt.language;
+  }
+
+  /// 使用本地引擎时，确保本地模型服务已启动（健康则直接复用）。
+  Future<void> _ensureLocalServers() async {
+    final manager = LocalServerManager.instance;
+    if (_config.stt.engine == 'whisper_local') {
+      final port = Uri.tryParse(_config.stt.baseUrl)?.port ?? 8000;
+      state.value =
+          const PipelineState(PipelinePhase.starting, '检查/启动本地语音识别服务…');
+      await manager.ensureServerRunning(
+        script: 'whisper_server.py',
+        args: [
+          '--model', _config.stt.model,
+          '--port', '$port',
+          '--device', 'auto',
+        ],
+        healthBase: _config.stt.baseUrl,
+      );
+    }
+    if (_config.translate.engine == 'nllb_local') {
+      final port = Uri.tryParse(_config.translate.baseUrl)?.port ?? 8765;
+      state.value =
+          const PipelineState(PipelinePhase.starting, '检查/启动本地翻译服务…');
+      await manager.ensureServerRunning(
+        script: 'nllb_server.py',
+        args: ['--port', '$port', '--device', 'auto'],
+        healthBase: _config.translate.baseUrl,
+      );
+    }
+    state.value = const PipelineState(PipelinePhase.starting);
   }
 
   String? get _mtSourceLanguage {

@@ -47,30 +47,46 @@ flutter build windows --release
 > # （path_provider_windows、screen_retriever_windows、jni 同理）
 > ```
 
-### 3. 配置引擎
+### 3. 配置引擎与使用
 
-#### 方案 A：本地模型（推荐，免 Key、数据不出本机、GPU 加速）
+#### 方案 A：本地模型（推荐，免 Key、数据不出本机、GPU 加速、后端自动拉起）
+
+**一次性准备**（第一次使用这台电脑时执行，约 10~30 分钟，含模型下载）：
 
 ```powershell
-# 首次：安装依赖（需要 Python 3.11 标准版；Anaconda 自带的旧版 ucrtbase 会导致 torch 加载失败）
+# 1. 安装后端依赖（自动选择标准版 Python 3.11，创建 venv）
 powershell -ExecutionPolicy Bypass -File tool\local_servers\setup.ps1
-# （setup 会顺便下载两个模型：faster-whisper-large-v3-turbo ~1.5GB + NLLB-200 600M ~2.4GB，
-#   下载支持断点续传，也可以手动执行 download_models.ps1）
 
-# 开两个终端分别启动服务
-powershell -ExecutionPolicy Bypass -File tool\local_servers\start_whisper.ps1   # STT    http://127.0.0.1:8000/v1
-powershell -ExecutionPolicy Bypass -File tool\local_servers\start_nllb.ps1     # 翻译   http://127.0.0.1:8765
+# 2. 下载两个模型（faster-whisper-large-v3-turbo ~1.5GB + NLLB-200 600M ~2.4GB，支持断点续传）
+powershell -ExecutionPolicy Bypass -File tool\local_servers\download_models.ps1
 ```
 
-应用里选择：STT 引擎「本地 Whisper（faster-whisper，免 Key）」、翻译引擎「本地 NLLB-200（免 Key）」
-（切换到本地引擎时会自动填默认地址），然后点 **开始监听**。
+**日常使用（零后端操作）**：
+
+1. 双击 `sync_translate.exe`
+2. 设置页选择 STT 引擎「本地 Whisper（faster-whisper，免 Key）」、翻译引擎「本地 NLLB-200（免 Key）」（切换时自动填好默认地址）
+3. 点 **开始监听** —— 应用会**自动检测并在后台拉起两个本地服务**（首次启动服务要等模型加载约 10~30 秒，之后秒开），无需开任何终端
+
+> 后端是应用自动管理的：服务已在运行就直接复用；没运行就隐藏窗口启动并等它就绪。
+> 服务日志在 `tool\local_servers\logs\*.log`；服务进程为后台 python，随系统重启需应用再次点"开始监听"自动拉起。
+
+**手动管理后端（可选）**：
+
+```powershell
+# 一键启动两个服务（各开一个日志窗口，关窗口即停服务）
+tool\local_servers\start_servers.bat
+
+# 或分别启动
+powershell -ExecutionPolicy Bypass -File tool\local_servers\start_whisper.ps1   # STT  http://127.0.0.1:8000/v1
+powershell -ExecutionPolicy Bypass -File tool\local_servers\start_nllb.ps1     # 翻译 http://127.0.0.1:8765
+```
 
 - STT：faster-whisper（CTranslate2，RTX 4060 Ti 实测 6 秒音频约 1 秒识别）
 - 翻译：官方 facebook/nllb-200-distilled-600M（PyTorch + transformers，CUDA，亚秒级）
 - 链路自检：`venv\Scripts\python.exe tool\local_servers\test_chain.py`
 - 纯 CPU 也能跑（略慢）。识别模型可编辑 `start_whisper.ps1` 换成 small/medium
 
-#### 方案 B：云端引擎
+#### 方案 B：云端引擎（无需本地后端）
 
 首次启动在设置页填写：
 

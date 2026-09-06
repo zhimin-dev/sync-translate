@@ -1,4 +1,5 @@
 import 'dart:ffi';
+import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
@@ -28,6 +29,9 @@ typedef _StopDart = void Function(Pointer<Void> handle);
 typedef _LastErrorNative = Pointer<Utf8> Function();
 typedef _LastErrorDart = Pointer<Utf8> Function();
 
+typedef _SpawnHiddenNative = Int32 Function(Pointer<Utf8> cmdline);
+typedef _SpawnHiddenDart = int Function(Pointer<Utf8> cmdline);
+
 /// dart:ffi 绑定到 windows/runner/native/wasapi_capture.cpp 导出的 C API。
 /// 仅 Windows 可用；其他平台加载即抛异常，由上层用占位实现代替。
 class WasapiBindings {
@@ -43,11 +47,31 @@ class WasapiBindings {
     _stop = _lib.lookupFunction<_StopNative, _StopDart>('wasapi_stop');
     _lastError = _lib
         .lookupFunction<_LastErrorNative, _LastErrorDart>('wasapi_last_error');
+    _spawnHidden =
+        _lib.lookupFunction<_SpawnHiddenNative, _SpawnHiddenDart>('st_spawn_hidden');
   }
 
   static WasapiBindings? _instance;
-  static WasapiBindings get instance =>
-      _instance ??= WasapiBindings._(DynamicLibrary.open('wasapi_capture.dll'));
+  static WasapiBindings get instance {
+    if (_instance != null) return _instance!;
+    try {
+      _instance = WasapiBindings._(DynamicLibrary.open('wasapi_capture.dll'));
+    } catch (_) {
+      // 非应用运行环境（如 dart run 测试）：按项目根回退绝对路径
+      final root = Platform.environment['SYNC_TRANSLATE_ROOT'];
+      final fallback = root == null
+          ? null
+          : '$root${Platform.pathSeparator}build${Platform.pathSeparator}windows'
+              '${Platform.pathSeparator}x64${Platform.pathSeparator}runner'
+              '${Platform.pathSeparator}Release${Platform.pathSeparator}wasapi_capture.dll';
+      if (fallback != null && File(fallback).existsSync()) {
+        _instance = WasapiBindings._(DynamicLibrary.open(fallback));
+      } else {
+        rethrow;
+      }
+    }
+    return _instance!;
+  }
 
   final DynamicLibrary _lib;
   late final _StartDart _start;
@@ -57,6 +81,17 @@ class WasapiBindings {
   late final _ReadDart _read;
   late final _StopDart _stop;
   late final _LastErrorDart _lastError;
+  late final _SpawnHiddenDart _spawnHidden;
+
+  /// 隐藏窗口启动后台进程（Windows 专用），返回 PID（<=0 表示失败）。
+  int spawnHidden(String cmdline) {
+    final c = cmdline.toNativeUtf8();
+    try {
+      return _spawnHidden(c);
+    } finally {
+      calloc.free(c);
+    }
+  }
 
   int start(int mode, Pointer<Pointer<Void>> outHandle) =>
       _start(mode, outHandle);
