@@ -23,10 +23,13 @@ class StubAudioCapture implements AudioCapture {
   Stream<String> get errors => _errors.stream;
 
   @override
-  Future<void> start(CaptureSource source) async {
+  Future<void> start(CaptureSource source, {String? device}) async {
     _errors.add(_message);
     throw UnimplementedError(_message);
   }
+
+  @override
+  Future<List<String>> listDevices(CaptureSource source) async => const [];
 
   @override
   Future<void> stop() async {}

@@ -57,6 +57,17 @@ void main(List<String> args) {
   final handle = outHandle.value;
   calloc.free(outHandle);
 
+  // 打印活动渲染设备（诊断用）
+  try {
+    final listDevices = lib.lookupFunction<Pointer<Utf8> Function(Int32),
+        Pointer<Utf8> Function(int)>('wasapi_list_devices');
+    final ptr = listDevices(0);
+    stdout.writeln('--- 活动渲染设备 ---');
+    stdout.writeln(ptr == nullptr ? '(空)' : ptr.toDartString());
+  } catch (e) {
+    stdout.writeln('list devices failed: $e');
+  }
+
   final buf = calloc<Float>(48000);
   final framesRead = calloc<Int32>();
   final sampleRate = calloc<Int32>();

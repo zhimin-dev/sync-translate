@@ -32,13 +32,34 @@ class WasapiAudioCapture implements AudioCapture {
   Stream<String> get errors => _errors.stream;
 
   @override
-  Future<void> start(CaptureSource source) async {
+  Future<List<String>> listDevices(CaptureSource source) async {
+    try {
+      final mode = source == CaptureSource.system ? 0 : 1;
+      final raw = WasapiBindings.instance.listDevices(mode);
+      if (raw.trim().isEmpty) return const [];
+      return raw
+          .split('\n')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  @override
+  Future<void> start(CaptureSource source, {String? device}) async {
     if (_running) return;
     final bindings = WasapiBindings.instance;
     final outHandle = calloc<Pointer<Void>>();
     try {
       final mode = source == CaptureSource.system ? 0 : 1;
-      final rc = bindings.start(mode, outHandle);
+      final int rc;
+      if (device != null && device.trim().isNotEmpty) {
+        rc = bindings.startOnDevice(mode, device.trim(), outHandle);
+      } else {
+        rc = bindings.start(mode, outHandle);
+      }
       if (rc != 0) {
         throw WasapiException('采集启动失败 (rc=$rc): ${bindings.lastError()}');
       }

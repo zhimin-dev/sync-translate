@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../core/audio/audio_capture.dart';
 import '../core/config/app_config.dart';
 
 const _kLanguageOptions = <String, String>{
@@ -15,6 +16,8 @@ const _kLanguageOptions = <String, String>{
   'ru': '俄语',
   'pt': '葡萄牙语',
 };
+
+const _kDefaultDevice = '(默认设备)';
 
 class SettingsView extends StatefulWidget {
   const SettingsView({
@@ -54,12 +57,37 @@ class _SettingsViewState extends State<SettingsView> {
   late String _trSourceLang = widget.config.translate.sourceLang;
   late String _trTargetLang = widget.config.translate.targetLang;
   late String _captureMode = widget.config.capture.mode;
+  late String _selectedDevice = widget.config.capture.device.isEmpty
+      ? _kDefaultDevice
+      : widget.config.capture.device;
+  List<String> _devices = const [];
+  bool _devicesLoading = false;
   late double _overlayOpacity = widget.config.overlay.opacity;
   late double _fontSize = widget.config.overlay.fontSize;
   late double _maxLines = widget.config.overlay.maxLines.toDouble();
   bool _obscureSttKey = true;
   bool _obscureTrKey = true;
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDevices();
+  }
+
+  Future<void> _loadDevices() async {
+    setState(() => _devicesLoading = true);
+    try {
+      final capture = createPlatformAudioCapture();
+      final list = await capture.listDevices(
+          _captureMode == 'mic' ? CaptureSource.microphone : CaptureSource.system);
+      if (mounted) setState(() => _devices = list);
+    } catch (_) {
+      if (mounted) setState(() => _devices = const []);
+    } finally {
+      if (mounted) setState(() => _devicesLoading = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -88,6 +116,9 @@ class _SettingsViewState extends State<SettingsView> {
       ..sourceLang = _trSourceLang
       ..targetLang = _trTargetLang;
     c.capture.mode = _captureMode;
+    c.capture.device = _selectedDevice == _kDefaultDevice
+        ? ''
+        : _selectedDevice;
     c.overlay
       ..opacity = _overlayOpacity
       ..fontSize = _fontSize
@@ -168,13 +199,49 @@ class _SettingsViewState extends State<SettingsView> {
                           icon: Icon(Icons.mic)),
                     ],
                     selected: {_captureMode},
-                    onSelectionChanged: (s) =>
-                        setState(() => _captureMode = s.first),
+                    onSelectionChanged: (s) {
+                      setState(() => _captureMode = s.first);
+                      _selectedDevice = _kDefaultDevice;
+                      _loadDevices();
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _devices.contains(_selectedDevice)
+                              ? _selectedDevice
+                              : _kDefaultDevice,
+                          decoration: const InputDecoration(
+                            labelText: '采集设备',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          items: [
+                            const DropdownMenuItem(
+                                value: _kDefaultDevice,
+                                child: Text('默认设备')),
+                            ..._devices.map((d) => DropdownMenuItem(
+                                value: d, child: Text(d, overflow: TextOverflow.ellipsis))),
+                          ],
+                          onChanged: (v) =>
+                              setState(() => _selectedDevice = v ?? _kDefaultDevice),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: '刷新设备列表',
+                        icon: const Icon(Icons.refresh),
+                        onPressed: _devicesLoading ? null : _loadDevices,
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'Windows：系统声音走 WASAPI 回环采集，无需权限；'
-                    '麦克风首次使用会触发系统授权。',
+                    '若 PotPlayer 等播放器没声音进字幕，请在此选择其实际输出设备。\n'
+                    '注意：播放器若使用 WASAPI 独占模式输出，回环采集将无法捕获，'
+                    '请把播放器音频渲染器改为共享模式（如 DirectSound / 内置 WASAPI 共享）。',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 20),

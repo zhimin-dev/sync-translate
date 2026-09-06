@@ -81,15 +81,20 @@ class TranslatorConfig {
 
 /// 采集配置。
 class CaptureConfig {
-  CaptureConfig({this.mode = 'system'});
+  CaptureConfig({this.mode = 'system', this.device = ''});
 
   /// 'system'（系统声音）| 'mic'（麦克风）
   String mode;
 
-  Map<String, dynamic> toJson() => {'mode': mode};
+  /// 端点友好名称（空 = 默认设备）；可选项见设置界面设备列表
+  String device;
 
-  factory CaptureConfig.fromJson(Map<String, dynamic> json) =>
-      CaptureConfig(mode: json['mode'] as String? ?? 'system');
+  Map<String, dynamic> toJson() => {'mode': mode, 'device': device};
+
+  factory CaptureConfig.fromJson(Map<String, dynamic> json) => CaptureConfig(
+        mode: json['mode'] as String? ?? 'system',
+        device: json['device'] as String? ?? '',
+      );
 }
 
 /// 悬浮窗配置。

@@ -15,6 +15,8 @@
 #include <avrt.h>
 #include <ksmedia.h>
 #include <mmdeviceapi.h>
+#include <propkey.h>  // 必须先于 functiondiscoverykeys_devpkey.h
+#include <functiondiscoverykeys_devpkey.h>
 
 #include <atomic>
 #include <cstdio>
@@ -42,6 +44,39 @@ std::string hresult_to_string(HRESULT hr) {
   return std::string(buf);
 }
 
+std::mutex g_device_list_mutex;
+std::string g_device_list;
+
+std::string device_friendly_name(IMMDevice* device) {
+  std::string name;
+  IPropertyStore* store = nullptr;
+  if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, &store))) {
+    PROPVARIANT var;
+    PropVariantInit(&var);
+    if (SUCCEEDED(store->GetValue(PKEY_Device_FriendlyName, &var)) &&
+        var.vt == VT_LPWSTR) {
+      const int len = WideCharToMultiByte(CP_UTF8, 0, var.pwszVal, -1, nullptr,
+                                          0, nullptr, nullptr);
+      name.resize(len > 0 ? len - 1 : 0);
+      if (!name.empty()) {
+        WideCharToMultiByte(CP_UTF8, 0, var.pwszVal, -1, name.data(), len,
+                            nullptr, nullptr);
+      }
+    }
+    PropVariantClear(&var);
+    store->Release();
+  }
+  return name;
+}
+
+std::string to_lower(const std::string& s) {
+  std::string out = s;
+  for (auto& c : out) {
+    c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+  }
+  return out;
+}
+
 constexpr REFERENCE_TIME kBufferDuration100ms = 100000;  // 100-ns units
 
 class WasapiCapture {
@@ -49,7 +84,7 @@ class WasapiCapture {
   WasapiCapture() = default;
   ~WasapiCapture() { Stop(); }
 
-  int Start(int mode) {
+  int Start(int mode, const std::string& device_name) {
     Stop();
     mode_ = mode;
 
@@ -77,34 +112,67 @@ class WasapiCapture {
     }
 
     const EDataFlow flow = (mode_ == WASAPI_MODE_SYSTEM) ? eRender : eCapture;
-    hr = enumerator_->GetDefaultAudioEndpoint(flow, eConsole, &device_);
-    if (FAILED(hr)) {
-      // 默认端点不可用（例如被拔出/禁用）时，回退到任一活动设备
-      std::string msg = (mode_ == WASAPI_MODE_SYSTEM)
-                            ? "GetDefaultAudioEndpoint(eRender) failed: "
-                            : "GetDefaultAudioEndpoint(eCapture) failed: ";
+    if (!device_name.empty()) {
+      // 按设备友好名称选择采集端点
       IMMDeviceCollection* collection = nullptr;
       hr = enumerator_->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE,
                                            &collection);
-      if (SUCCEEDED(hr)) {
-        UINT count = 0;
-        collection->GetCount(&count);
-        if (count > 0) {
-          hr = collection->Item(0, &device_);
-          msg += hresult_to_string(hr) + "；已回退到活动设备（共 " +
-                 std::to_string(count) + " 个）";
-        } else {
-          hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
-          msg += hresult_to_string(hr) + "；且无任何活动设备";
-        }
-        collection->Release();
-      }
       if (FAILED(hr)) {
-        set_error(msg);
+        set_error("EnumAudioEndpoints failed: " + hresult_to_string(hr));
         CleanupCom();
         return -3;
       }
-      set_error(msg);  // 回退成功，记录提示
+      UINT count = 0;
+      collection->GetCount(&count);
+      IMMDevice* found = nullptr;
+      for (UINT i = 0; i < count && found == nullptr; i++) {
+        IMMDevice* dev = nullptr;
+        if (SUCCEEDED(collection->Item(i, &dev))) {
+          if (to_lower(device_friendly_name(dev)) == to_lower(device_name)) {
+            found = dev;
+          } else {
+            dev->Release();
+          }
+        }
+      }
+      collection->Release();
+      if (found == nullptr) {
+        set_error("找不到指定设备: " + device_name +
+                  "（设备可能已拔出，请到设置里刷新设备列表）");
+        CleanupCom();
+        return -10;
+      }
+      device_ = found;
+    } else {
+      hr = enumerator_->GetDefaultAudioEndpoint(flow, eConsole, &device_);
+      if (FAILED(hr)) {
+        // 默认端点不可用（例如被拔出/禁用）时，回退到任一活动设备
+        std::string msg = (mode_ == WASAPI_MODE_SYSTEM)
+                              ? "GetDefaultAudioEndpoint(eRender) failed: "
+                              : "GetDefaultAudioEndpoint(eCapture) failed: ";
+        IMMDeviceCollection* collection = nullptr;
+        hr = enumerator_->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE,
+                                             &collection);
+        if (SUCCEEDED(hr)) {
+          UINT count = 0;
+          collection->GetCount(&count);
+          if (count > 0) {
+            hr = collection->Item(0, &device_);
+            msg += hresult_to_string(hr) + "；已回退到活动设备（共 " +
+                   std::to_string(count) + " 个）";
+          } else {
+            hr = HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+            msg += hresult_to_string(hr) + "；且无任何活动设备";
+          }
+          collection->Release();
+        }
+        if (FAILED(hr)) {
+          set_error(msg);
+          CleanupCom();
+          return -3;
+        }
+        set_error(msg);  // 回退成功，记录提示
+      }
     }
 
     hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
@@ -323,13 +391,81 @@ extern "C" {
 int wasapi_start(int mode, void** out_handle) {
   if (out_handle == nullptr) return -1;
   auto* capture = new WasapiCapture();
-  int rc = capture->Start(mode);
+  int rc = capture->Start(mode, "");
   if (rc != 0) {
     delete capture;
     return rc;
   }
   *out_handle = capture;
   return 0;
+}
+
+int wasapi_start_on_device(int mode, const char* device_name,
+                           void** out_handle) {
+  if (out_handle == nullptr) return -1;
+  auto* capture = new WasapiCapture();
+  int rc = capture->Start(mode,
+                          device_name == nullptr ? "" : std::string(device_name));
+  if (rc != 0) {
+    delete capture;
+    return rc;
+  }
+  *out_handle = capture;
+  return 0;
+}
+
+const char* wasapi_list_devices(int mode) {
+  const HRESULT coinit_hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  const bool com_ok = SUCCEEDED(coinit_hr) || coinit_hr == RPC_E_CHANGED_MODE;
+  if (!com_ok) {
+    set_error("CoInitializeEx failed: " + hresult_to_string(coinit_hr));
+    return nullptr;
+  }
+  const bool com_owned = SUCCEEDED(coinit_hr);  // 自己初始化的才负责反初始化
+  IMMDeviceEnumerator* enumerator = nullptr;
+  HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
+                                CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                                reinterpret_cast<void**>(&enumerator));
+  if (FAILED(hr)) {
+    set_error("CoCreateInstance(MMDeviceEnumerator) failed: " +
+              hresult_to_string(hr));
+    if (com_owned) CoUninitialize();
+    return nullptr;
+  }
+  const EDataFlow flow = (mode == WASAPI_MODE_SYSTEM) ? eRender : eCapture;
+  std::vector<std::string> names;
+  IMMDeviceCollection* collection = nullptr;
+  hr = enumerator->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection);
+  if (SUCCEEDED(hr)) {
+    UINT count = 0;
+    collection->GetCount(&count);
+    for (UINT i = 0; i < count; i++) {
+      IMMDevice* dev = nullptr;
+      if (SUCCEEDED(collection->Item(i, &dev))) {
+        names.push_back(device_friendly_name(dev));
+        dev->Release();
+      }
+    }
+    collection->Release();
+  } else {
+    set_error("EnumAudioEndpoints failed: " + hresult_to_string(hr));
+  }
+  enumerator->Release();
+  if (com_owned) CoUninitialize();
+  std::string joined;
+  for (size_t i = 0; i < names.size(); i++) {
+    if (i > 0) joined += "\n";
+    joined += names[i];
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_device_list_mutex);
+    g_device_list = std::move(joined);
+    return g_device_list.c_str();
+  }
+}
+
+void wasapi_free_string(const char* s) {
+  (void)s;  // 内部静态存储，无需释放
 }
 
 int wasapi_read(void* handle, float* out, int max_frames, int* frames_read,

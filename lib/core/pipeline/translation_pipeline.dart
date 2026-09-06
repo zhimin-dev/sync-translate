@@ -95,8 +95,11 @@ class TranslationPipeline {
       _chunkSub = capture.chunks.listen(segmenter.add);
 
       await capture.start(_config.capture.mode == 'mic'
-          ? CaptureSource.microphone
-          : CaptureSource.system);
+              ? CaptureSource.microphone
+              : CaptureSource.system,
+          device: _config.capture.device.trim().isEmpty
+              ? null
+              : _config.capture.device);
       state.value = const PipelineState(PipelinePhase.listening);
     } catch (e) {
       state.value = PipelineState(PipelinePhase.error, '启动失败: $e');

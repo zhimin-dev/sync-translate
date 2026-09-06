@@ -9,7 +9,9 @@ enum CaptureSource { system, microphone }
 
 /// 平台音频采集抽象。所有实现统一输出 16kHz 单声道 float32 PCM。
 abstract class AudioCapture {
-  Future<void> start(CaptureSource source);
+  /// 开始采集；[device] 为端点友好名称（null/空 = 默认设备），
+  /// 可选值来自 [listDevices]。
+  Future<void> start(CaptureSource source, {String? device});
 
   Future<void> stop();
 
@@ -18,6 +20,9 @@ abstract class AudioCapture {
 
   /// 运行时错误（如默认音频设备被拔出）。
   Stream<String> get errors;
+
+  /// 列出 [source] 对应的活动端点友好名称。
+  Future<List<String>> listDevices(CaptureSource source);
 }
 
 /// 按平台创建采集实现。

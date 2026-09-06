@@ -21,7 +21,22 @@ enum {
 
 // Starts capture. On success returns 0 and stores an opaque handle in *out_handle.
 // The captured stream is converted to mono float32 at the device mix rate.
+// Uses the default endpoint (with fallback to any active device).
 WASAPI_CAPTURE_API int wasapi_start(int mode, void** out_handle);
+
+// Starts capture on the endpoint whose friendly name matches device_name
+// (UTF-8, case-insensitive). Empty/NULL device_name behaves like wasapi_start.
+// Returns 0 on success, negative on error (device not found => -10).
+WASAPI_CAPTURE_API int wasapi_start_on_device(int mode, const char* device_name,
+                                              void** out_handle);
+
+// Lists active endpoint friendly names (UTF-8), one per line.
+// Returns NULL on failure; see wasapi_last_error().
+// The returned pointer is valid until the next call; copy it immediately.
+WASAPI_CAPTURE_API const char* wasapi_list_devices(int mode);
+
+// Frees the buffer returned by wasapi_list_devices (no-op, kept for symmetry).
+WASAPI_CAPTURE_API void wasapi_free_string(const char* s);
 
 // Reads up to max_frames mono float32 samples into out.
 // If out is NULL this is an info probe: only *frames_read (0) and
