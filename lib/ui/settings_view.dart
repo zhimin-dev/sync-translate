@@ -24,12 +24,12 @@ class SettingsView extends StatefulWidget {
     super.key,
     required this.config,
     required this.onStart,
-    required this.onQuit,
+    required this.onHideToTray,
   });
 
   final AppConfig config;
   final Future<void> Function() onStart;
-  final Future<void> Function() onQuit;
+  final Future<void> Function() onHideToTray;
 
   @override
   State<SettingsView> createState() => _SettingsViewState();
@@ -179,7 +179,7 @@ class _SettingsViewState extends State<SettingsView> {
     return Scaffold(
       body: Column(
         children: [
-          _TitleBar(onQuit: widget.onQuit),
+          _TitleBar(onHideToTray: widget.onHideToTray),
           Expanded(
             child: Form(
               key: _formKey,
@@ -509,9 +509,9 @@ class _SettingsViewState extends State<SettingsView> {
 }
 
 class _TitleBar extends StatelessWidget {
-  const _TitleBar({required this.onQuit});
+  const _TitleBar({required this.onHideToTray});
 
-  final Future<void> Function() onQuit;
+  final Future<void> Function() onHideToTray;
 
   @override
   Widget build(BuildContext context) {
@@ -533,9 +533,9 @@ class _TitleBar extends StatelessWidget {
               onPressed: () => windowManager.minimize(),
             ),
             IconButton(
-              tooltip: '退出',
+              tooltip: '隐藏到托盘（右键托盘图标退出）',
               icon: const Icon(Icons.close, size: 18),
-              onPressed: onQuit,
+              onPressed: onHideToTray,
             ),
           ],
         ),
