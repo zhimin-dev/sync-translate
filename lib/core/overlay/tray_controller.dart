@@ -3,9 +3,16 @@ import 'dart:io';
 import 'package:tray_manager/tray_manager.dart';
 
 class _AppTrayListener with TrayListener {
-  _AppTrayListener({required this.onShow, required this.onExit});
+  _AppTrayListener({
+    required this.onShow,
+    required this.onBatch,
+    required this.onSettings,
+    required this.onExit,
+  });
 
   final Future<void> Function() onShow;
+  final Future<void> Function() onBatch;
+  final Future<void> Function() onSettings;
   final Future<void> Function() onExit;
 
   @override
@@ -23,6 +30,12 @@ class _AppTrayListener with TrayListener {
       case 'show':
         onShow();
         break;
+      case 'batch':
+        onBatch();
+        break;
+      case 'settings':
+        onSettings();
+        break;
       case 'exit':
         onExit();
         break;
@@ -35,6 +48,8 @@ class _AppTrayListener with TrayListener {
 class TrayController {
   Future<void> init({
     required Future<void> Function() onShow,
+    required Future<void> Function() onBatch,
+    required Future<void> Function() onSettings,
     required Future<void> Function() onExit,
   }) async {
     final log = <String>[];
@@ -57,11 +72,17 @@ class TrayController {
           'setContextMenu',
           () => trayManager.setContextMenu(Menu(items: [
                 MenuItem(key: 'show', label: '显示主界面'),
+                MenuItem(key: 'batch', label: '离线转换'),
+                MenuItem(key: 'settings', label: '设置'),
                 MenuItem.separator(),
                 MenuItem(key: 'exit', label: '退出'),
               ])));
-      trayManager
-          .addListener(_AppTrayListener(onShow: onShow, onExit: onExit));
+      trayManager.addListener(_AppTrayListener(
+        onShow: onShow,
+        onBatch: onBatch,
+        onSettings: onSettings,
+        onExit: onExit,
+      ));
       log.add('OK   addListener');
     } catch (e) {
       log.add('FATAL: $e');

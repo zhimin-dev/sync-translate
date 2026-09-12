@@ -5,10 +5,12 @@ import 'core/config/app_config.dart';
 import 'core/overlay/overlay_window_controller.dart';
 import 'core/overlay/tray_controller.dart';
 import 'core/pipeline/translation_pipeline.dart';
+import 'ui/batch_view.dart';
+import 'ui/main_view.dart';
 import 'ui/overlay_view.dart';
 import 'ui/settings_view.dart';
 
-enum AppMode { settings, overlay }
+enum AppMode { main, settings, batch, overlay }
 
 class SyncTranslateApp extends StatefulWidget {
   const SyncTranslateApp({super.key, required this.initialConfig});
@@ -24,7 +26,7 @@ class _SyncTranslateAppState extends State<SyncTranslateApp>
   late final AppConfig _config = widget.initialConfig;
   final _window = OverlayWindowController();
   final _tray = TrayController();
-  AppMode _mode = AppMode.settings;
+  AppMode _mode = AppMode.main;
   TranslationPipeline? _pipeline;
   bool _quitting = false;
 
@@ -40,7 +42,9 @@ class _SyncTranslateAppState extends State<SyncTranslateApp>
   Future<void> _initTray() async {
     try {
       await _tray.init(
-        onShow: _showFromTray,
+        onShow: _showMainFromTray,
+        onBatch: () => _openPageFromTray(AppMode.batch),
+        onSettings: () => _openPageFromTray(AppMode.settings),
         onExit: _quit,
       );
     } catch (e) {
@@ -48,11 +52,44 @@ class _SyncTranslateAppState extends State<SyncTranslateApp>
     }
   }
 
-  Future<void> _showFromTray() async {
+  /// 托盘菜单打开指定页面（在监听中则先停止并退出悬浮窗形态）。
+  Future<void> _openPageFromTray(AppMode target) async {
+    await _stopListening();
+    await _enterWindowMode();
+    setState(() => _mode = target);
     try {
       await windowManager.show();
       await windowManager.focus();
     } catch (_) {}
+  }
+
+  Future<void> _showMainFromTray() async {
+    if (_mode == AppMode.overlay) {
+      await _stopListening();
+      await _enterWindowMode();
+      setState(() => _mode = AppMode.main);
+    }
+    try {
+      await windowManager.show();
+      await windowManager.focus();
+    } catch (_) {}
+  }
+
+  Future<void> _stopListening() async {
+    final pipeline = _pipeline;
+    _pipeline = null;
+    if (pipeline != null) {
+      await pipeline.stop();
+      await pipeline.dispose();
+    }
+  }
+
+  Future<void> _enterWindowMode() async {
+    try {
+      await _window.enterSettings();
+    } catch (_) {
+      // 平台不支持窗口控制时忽略
+    }
   }
 
   Future<void> _hideToTray() async {
@@ -69,13 +106,6 @@ class _SyncTranslateAppState extends State<SyncTranslateApp>
   }
 
   Future<void> _startListening() async {
-    final error = _config.validate();
-    if (error != null) {
-      _showMessage('无法启动：$error');
-      return;
-    }
-    await _config.save();
-
     final pipeline = TranslationPipeline(config: _config);
     _pipeline = pipeline;
     setState(() => _mode = AppMode.overlay);
@@ -87,29 +117,16 @@ class _SyncTranslateAppState extends State<SyncTranslateApp>
     await pipeline.start();
   }
 
-  Future<void> _backToSettings() async {
-    final pipeline = _pipeline;
-    _pipeline = null;
-    if (pipeline != null) {
-      await pipeline.stop();
-      await pipeline.dispose();
-    }
-    setState(() => _mode = AppMode.settings);
-    try {
-      await _window.enterSettings();
-    } catch (_) {
-      // 平台不支持窗口控制时忽略
-    }
+  Future<void> _backToMain() async {
+    await _stopListening();
+    await _enterWindowMode();
+    setState(() => _mode = AppMode.main);
   }
 
   Future<void> _quit() async {
     if (_quitting) return;
     _quitting = true;
-    final pipeline = _pipeline;
-    if (pipeline != null) {
-      await pipeline.stop();
-      await pipeline.dispose();
-    }
+    await _stopListening();
     await _tray.dispose();
     try {
       await windowManager.setPreventClose(false);
@@ -142,19 +159,31 @@ class _SyncTranslateAppState extends State<SyncTranslateApp>
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFF15171C),
       ),
-      home: _mode == AppMode.settings
-          ? SettingsView(
-              config: _config,
-              onStart: _startListening,
-              onHideToTray: _hideToTray,
-            )
-          : OverlayView(
-              pipeline: _pipeline!,
-              maxLines: _config.overlay.maxLines,
-              fontSize: _config.overlay.fontSize,
-              autoHideSeconds: _config.overlay.autoHideSeconds,
-              onBackToSettings: _backToSettings,
-            ),
+      home: switch (_mode) {
+        AppMode.main => MainView(
+            config: _config,
+            onStart: _startListening,
+            onOpenSettings: () => setState(() => _mode = AppMode.settings),
+            onHideToTray: _hideToTray,
+          ),
+        AppMode.settings => SettingsView(
+            config: _config,
+            onBack: () => setState(() => _mode = AppMode.main),
+            onHideToTray: _hideToTray,
+          ),
+        AppMode.batch => BatchView(
+            config: _config,
+            onBack: () => setState(() => _mode = AppMode.main),
+            onHideToTray: _hideToTray,
+          ),
+        AppMode.overlay => OverlayView(
+            pipeline: _pipeline!,
+            maxLines: _config.overlay.maxLines,
+            fontSize: _config.overlay.fontSize,
+            autoHideSeconds: _config.overlay.autoHideSeconds,
+            onBackToSettings: _backToMain,
+          ),
+      },
     );
   }
 }
