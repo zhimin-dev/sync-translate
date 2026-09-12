@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -63,8 +63,13 @@ const List<ModelSpec> kSttModels = [
 /// 翻译（MT）模型目录。
 const List<ModelSpec> kMtModels = [
   // 本地
-  ModelSpec('facebook/nllb-200-distilled-600M', 'NLLB-200 600M（本地）', 'mt',
+  ModelSpec('facebook/nllb-200-distilled-600M', 'NLLB-200 600M（本地·快）', 'mt',
       dirName: 'facebook--nllb-200-distilled-600M',
+      files: ['config.json', 'generation_config.json', 'pytorch_model.bin',
+          'sentencepiece.bpe.model', 'special_tokens_map.json',
+          'tokenizer.json', 'tokenizer_config.json']),
+  ModelSpec('facebook/nllb-200-distilled-1.3B', 'NLLB-200 1.3B（本地·质量更好）', 'mt',
+      dirName: 'facebook--nllb-200-distilled-1.3B',
       files: ['config.json', 'generation_config.json', 'pytorch_model.bin',
           'sentencepiece.bpe.model', 'special_tokens_map.json',
           'tokenizer.json', 'tokenizer_config.json']),

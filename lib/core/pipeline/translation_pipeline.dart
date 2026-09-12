@@ -149,10 +149,14 @@ class TranslationPipeline {
             '本地翻译模型未下载：${_config.translate.model}\n'
             '请到「设置」页选择该模型并点击下载（支持断点续传）。');
       }
+      final modelDir = ModelManager.modelDir('mt', _config.translate.model);
+      final nllbArgs = ['--port', '$port', '--device', 'auto'];
+      if (modelDir != null) nllbArgs.addAll(['--model-dir', modelDir]);
       await manager.ensureServerRunning(
         script: 'nllb_server.py',
-        args: ['--port', '$port', '--device', 'auto'],
+        args: nllbArgs,
         healthBase: _config.translate.baseUrl,
+        requiredModel: _config.translate.model,
       );
     }
     state.value = const PipelineState(PipelinePhase.starting);

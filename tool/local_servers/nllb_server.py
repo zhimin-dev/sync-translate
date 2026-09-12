@@ -42,10 +42,12 @@ log = logging.getLogger("nllb-server")
 _tokenizer = None
 _model = None
 _device_name = "not-loaded"
+_model_name = ""
 
 
 def load_model(model_dir: Path, device: str) -> None:
-    global _tokenizer, _model, _device_name
+    global _tokenizer, _model, _device_name, _model_name
+    _model_name = str(model_dir)
     import torch  # noqa: F401  (延迟导入，加快 --help 等路径)
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
@@ -104,7 +106,8 @@ class TranslateResponse(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": _model is not None, "device": _device_name}
+    return {"ok": _model is not None, "device": _device_name,
+            "model": _model_name}
 
 
 @app.post("/translate", response_model=TranslateResponse)

@@ -121,8 +121,10 @@ class LocalServerManager {
     if (await isHealthy(healthBase)) {
       if (requiredModel == null) return null;
       final current = await serverModel(healthBase);
+      final need = _basename(requiredModel);
+      // 服务上报的是模型目录：basename 相等或以 "--<模型名>" 结尾即匹配
       final match = current != null &&
-          (_basename(current) == _basename(requiredModel));
+          (_basename(current) == need || _basename(current).endsWith('--$need'));
       if (match) return null;
       // 配置的模型与运行中不一致：重启服务
       final port = Uri.tryParse(healthBase)?.port;
