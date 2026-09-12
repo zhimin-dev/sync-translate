@@ -123,7 +123,7 @@ class TranslationPipeline {
       final port = Uri.tryParse(_config.stt.baseUrl)?.port ?? 8000;
       state.value =
           const PipelineState(PipelinePhase.starting, '检查/启动本地语音识别服务…');
-      if (!ModelManager.isDownloaded(_config.stt.model)) {
+      if (!ModelManager.isDownloaded('stt', _config.stt.model)) {
         throw LocalServerException(
             '本地识别模型未下载：${_config.stt.model}\n'
             '请到「设置」页选择该模型并点击下载（支持断点续传），'
@@ -144,6 +144,11 @@ class TranslationPipeline {
       final port = Uri.tryParse(_config.translate.baseUrl)?.port ?? 8765;
       state.value =
           const PipelineState(PipelinePhase.starting, '检查/启动本地翻译服务…');
+      if (!ModelManager.isDownloaded('mt', _config.translate.model)) {
+        throw LocalServerException(
+            '本地翻译模型未下载：${_config.translate.model}\n'
+            '请到「设置」页选择该模型并点击下载（支持断点续传）。');
+      }
       await manager.ensureServerRunning(
         script: 'nllb_server.py',
         args: ['--port', '$port', '--device', 'auto'],
