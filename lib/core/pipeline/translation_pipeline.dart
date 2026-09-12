@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../audio/audio_capture.dart';
 import '../config/app_config.dart';
+import '../model/model_manager.dart';
 import '../stt/stt_engine.dart';
 import '../translate/translator.dart';
 import 'local_server_manager.dart';
@@ -122,6 +123,12 @@ class TranslationPipeline {
       final port = Uri.tryParse(_config.stt.baseUrl)?.port ?? 8000;
       state.value =
           const PipelineState(PipelinePhase.starting, '检查/启动本地语音识别服务…');
+      if (!ModelManager.isDownloaded(_config.stt.model)) {
+        throw LocalServerException(
+            '本地识别模型未下载：${_config.stt.model}\n'
+            '请到「设置」页选择该模型并点击下载（支持断点续传），'
+            '或等待后台下载完成后再试。');
+      }
       await manager.ensureServerRunning(
         script: 'whisper_server.py',
         args: [

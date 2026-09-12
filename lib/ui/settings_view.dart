@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../core/config/app_config.dart';
+import '../core/model/model_manager.dart';
 
 const _kLanguageOptions = <String, String>{
   'auto': '自动检测',
@@ -172,11 +173,14 @@ class _SettingsViewState extends State<SettingsView> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  _buildTextFormField(
-                    controller: _sttModel,
-                    label: '模型',
-                    hint: '云端：whisper-large-v3-turbo；本地：Systran/faster-whisper-large-v3（准确）或 deepdml/…-turbo-ct2（快）',
-                  ),
+                  if (_sttEngine == 'whisper_local')
+                    _buildLocalModelPicker()
+                  else
+                    _buildTextFormField(
+                      controller: _sttModel,
+                      label: '模型',
+                      hint: 'whisper-large-v3-turbo（Groq）/ whisper-1（OpenAI）',
+                    ),
                   const SizedBox(height: 8),
                   _languageDropdown(
                     label: '识别语言',
@@ -282,6 +286,136 @@ class _SettingsViewState extends State<SettingsView> {
         ],
       ),
     );
+  }
+
+  static const _kCustomModel = '__custom__';
+
+  Future<void> _onLocalModelChanged(String? v) async {
+    if (v == null) return;
+    if (v == _kCustomModel) {
+      setState(() {});
+      return;
+    }
+    setState(() => _sttModel.text = v);
+    if (!ModelManager.isDownloaded(v)) {
+      final result = await ModelManager.instance.ensureDownloaded(v);
+      if (result == 0) {
+        _showSnack('开始后台下载模型（断点续传），完成后即可使用');
+      } else if (result == -1) {
+        _showSnack('无法自动下载该模型，请手动运行 download_models.ps1');
+      }
+    }
+  }
+
+  Widget _buildLocalModelPicker() {
+    final current = _sttModel.text.trim();
+    final isCustom = ModelManager.specOf(current) == null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          initialValue: isCustom ? _kCustomModel : current,
+          decoration: const InputDecoration(
+            labelText: '识别模型',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+          items: [
+            ...kLocalWhisperModels.map((m) => DropdownMenuItem(
+                  value: m.name,
+                  child: Text(
+                    '${m.label} · ${m.name}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                )),
+            const DropdownMenuItem(
+                value: _kCustomModel, child: Text('自定义（手动填写）')),
+          ],
+          onChanged: _onLocalModelChanged,
+        ),
+        ValueListenableBuilder<Map<String, int>>(
+          valueListenable: ModelManager.instance.progress,
+          builder: (context, p, _) {
+            final name = _sttModel.text.trim();
+            if (ModelManager.specOf(name) == null) {
+              return const SizedBox.shrink();
+            }
+            final downloaded = ModelManager.isDownloaded(name);
+            final bytes = p[name] ?? 0;
+            if (downloaded) {
+              return Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle,
+                        size: 14, color: Colors.greenAccent),
+                    const SizedBox(width: 6),
+                    Text('模型已下载，开始监听时自动加载',
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ),
+              );
+            }
+            if (bytes > 0) {
+              return Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const LinearProgressIndicator(minHeight: 4),
+                    const SizedBox(height: 4),
+                    Text(
+                      '后台下载中… 已下载 ${(bytes / 1048576).toStringAsFixed(0)} MB'
+                      '（断点续传，可关闭窗口）',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              );
+            }
+            return Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(
+                children: [
+                  Text('模型未下载',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final result =
+                          await ModelManager.instance.ensureDownloaded(name);
+                      if (result == 0) {
+                        _showSnack('开始后台下载模型（断点续传）');
+                      } else if (result == -1) {
+                        _showSnack('无法自动下载，请手动运行 download_models.ps1');
+                      }
+                      setState(() {});
+                    },
+                    icon: const Icon(Icons.download, size: 14),
+                    label: const Text('下载'),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+        if (isCustom)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: _buildTextFormField(
+              controller: _sttModel,
+              label: '模型名（HuggingFace 仓库）',
+              hint: 'org/model-name',
+            ),
+          ),
+      ],
+    );
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Widget _buildTitleBar() {
