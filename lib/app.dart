@@ -152,6 +152,7 @@ class _SyncTranslateAppState extends State<SyncTranslateApp>
               pipeline: _pipeline!,
               maxLines: _config.overlay.maxLines,
               fontSize: _config.overlay.fontSize,
+              autoHideSeconds: _config.overlay.autoHideSeconds,
               onBackToSettings: _backToSettings,
             ),
     );

@@ -103,22 +103,28 @@ class OverlayConfig {
     this.opacity = 0.88,
     this.fontSize = 18,
     this.maxLines = 4,
+    this.autoHideSeconds = 8,
   });
 
   double opacity;
   double fontSize;
   int maxLines;
 
+  /// 无新字幕多少秒后自动淡出（0 = 一直显示）
+  int autoHideSeconds;
+
   Map<String, dynamic> toJson() => {
         'opacity': opacity,
         'fontSize': fontSize,
         'maxLines': maxLines,
+        'autoHideSeconds': autoHideSeconds,
       };
 
   factory OverlayConfig.fromJson(Map<String, dynamic> json) => OverlayConfig(
         opacity: (json['opacity'] as num?)?.toDouble() ?? 0.88,
         fontSize: (json['fontSize'] as num?)?.toDouble() ?? 18,
         maxLines: json['maxLines'] as int? ?? 4,
+        autoHideSeconds: json['autoHideSeconds'] as int? ?? 8,
       );
 }
 

@@ -7,18 +7,24 @@ import 'package:window_manager/window_manager.dart';
 import '../core/pipeline/translation_pipeline.dart';
 
 /// 悬浮字幕视图：置顶半透明窗口，显示最近 N 条原文/译文。
+/// 长时间无新字幕（如句子间停顿很久）时自动淡出，
+/// 下一句开始识别后重新显示。
 class OverlayView extends StatefulWidget {
   const OverlayView({
     super.key,
     required this.pipeline,
     required this.maxLines,
     required this.fontSize,
+    required this.autoHideSeconds,
     required this.onBackToSettings,
   });
 
   final TranslationPipeline pipeline;
   final int maxLines;
   final double fontSize;
+
+  /// 无新字幕多少秒后自动淡出（0 = 一直显示）
+  final int autoHideSeconds;
   final VoidCallback onBackToSettings;
 
   @override
@@ -29,14 +35,31 @@ class _OverlayViewState extends State<OverlayView> {
   final _focusNode = FocusNode();
   final List<SubtitleEntry> _entries = [];
   StreamSubscription<SubtitleEntry>? _sub;
+  Timer? _hideTimer;
+  DateTime _lastUpdate = DateTime.now();
+  bool _autoHidden = false;
 
   @override
   void initState() {
     super.initState();
     _sub = widget.pipeline.subtitles.listen(_onEntry);
+    if (widget.autoHideSeconds > 0) {
+      _hideTimer = Timer.periodic(
+          const Duration(seconds: 1), (_) => _checkAutoHide());
+    }
+  }
+
+  void _checkAutoHide() {
+    if (_autoHidden || _entries.isEmpty) return;
+    final idle = DateTime.now().difference(_lastUpdate);
+    if (idle.inSeconds >= widget.autoHideSeconds) {
+      setState(() => _autoHidden = true);
+    }
   }
 
   void _onEntry(SubtitleEntry entry) {
+    _lastUpdate = DateTime.now();
+    _autoHidden = false; // 新字幕来了，重新显示
     setState(() {
       if (entry.seq == SubtitleEntry.provisionalSeq) {
         // 临时字幕（边听边出）：替换上一条临时字幕
@@ -63,6 +86,7 @@ class _OverlayViewState extends State<OverlayView> {
   @override
   void dispose() {
     _sub?.cancel();
+    _hideTimer?.cancel();
     _focusNode.dispose();
     super.dispose();
   }
@@ -90,7 +114,14 @@ class _OverlayViewState extends State<OverlayView> {
           child: Column(
             children: [
               _buildHeader(),
-              Expanded(child: _buildSubtitleList()),
+              Expanded(
+                child: AnimatedOpacity(
+                  opacity: _autoHidden ? 0.0 : 1.0,
+                  duration: const Duration(milliseconds: 500),
+                  curve: Curves.easeOut,
+                  child: _buildSubtitleList(),
+                ),
+              ),
             ],
           ),
         ),

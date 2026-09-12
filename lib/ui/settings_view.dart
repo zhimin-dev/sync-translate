@@ -71,6 +71,7 @@ class _SettingsViewState extends State<SettingsView> {
   late double _overlayOpacity = widget.config.overlay.opacity;
   late double _fontSize = widget.config.overlay.fontSize;
   late double _maxLines = widget.config.overlay.maxLines.toDouble();
+  late int _autoHide = widget.config.overlay.autoHideSeconds;
   bool _obscureSttKey = true;
   bool _obscureTrKey = true;
   bool _saving = false;
@@ -240,7 +241,8 @@ class _SettingsViewState extends State<SettingsView> {
     c.overlay
       ..opacity = _overlayOpacity
       ..fontSize = _fontSize
-      ..maxLines = _maxLines.round();
+      ..maxLines = _maxLines.round()
+      ..autoHideSeconds = _autoHide;
   }
 
   Future<void> _save() async {
@@ -523,6 +525,37 @@ class _SettingsViewState extends State<SettingsView> {
                         ),
                       ),
                     ],
+                  ),
+                  Row(
+                    children: [
+                      const SizedBox(width: 90, child: Text('空闲自动隐藏')),
+                      Expanded(
+                        child: Slider(
+                          value: _autoHide.toDouble(),
+                          min: 0,
+                          max: 30,
+                          divisions: 30,
+                          label: _autoHide == 0
+                              ? '不隐藏'
+                              : '$_autoHide 秒后淡出',
+                          onChanged: (v) =>
+                              setState(() => _autoHide = v.round()),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 76,
+                        child: Text(
+                          _autoHide == 0 ? '不隐藏' : '$_autoHide 秒',
+                          textAlign: TextAlign.end,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '句子之间停顿超过设定时间时，字幕自动淡出；下一句开始说话时再显示。',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 20),
                   Row(
