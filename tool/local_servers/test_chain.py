@@ -29,7 +29,7 @@ wav_bytes = buf.getvalue()
 print(f"[1/3] 语音样本: {len(pcm) / 16000:.1f}s @16kHz")
 
 # 2) faster-whisper 识别
-resp = httpx.post(
+resp = httpx.Client(trust_env=False).post(
     "http://127.0.0.1:8000/v1/audio/transcriptions",
     files={"file": ("audio.wav", wav_bytes, "audio/wav")},
     data={"model": "turbo", "response_format": "json"},
@@ -40,7 +40,7 @@ text = resp.json()["text"].strip()
 print(f"[2/3] 识别结果: {text!r}")
 
 # 3) NLLB 翻译
-resp2 = httpx.post(
+resp2 = httpx.Client(trust_env=False).post(
     "http://127.0.0.1:8765/translate",
     json={"text": text, "source_lang": "en", "target_lang": "zh"},
     timeout=120,
@@ -48,3 +48,4 @@ resp2 = httpx.post(
 resp2.raise_for_status()
 print(f"[3/3] 翻译结果: {resp2.json()['translation']!r}")
 print("=== 本地链路验证通过 ===")
+
