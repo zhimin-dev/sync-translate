@@ -1,10 +1,15 @@
 """faster-whisper 本地语音识别服务（sync-translate 专用，OpenAI 兼容）。
 
 - faster-whisper（CTranslate2 内核），优先 CUDA，自动回退 CPU
-- HTTP 接口（与 OpenAI /audio/transcriptions 对齐）：
+- HTTP 接口：
+    实时字幕：
     GET  /health                    -> {"ok": true, "device": "cuda"}
     POST /v1/audio/transcriptions   multipart: file=audio.wav, model, language, response_format
-                                    -> {"text": "..."}
+                                     -> {"text": "..."}
+    批量离线字幕（音视频文件 -> SRT，异步任务队列）：
+    POST /batch/transcribe          {"path": "...", "target_lang": "zh"} -> {"job_id": "..."}
+    GET  /batch/status?job_id=...   -> {status, progress, srt_path, ...}
+    GET  /batch/jobs                -> 全部任务列表
 
 运行：venv\\Scripts\\python.exe whisper_server.py [--model deepdml/faster-whisper-large-v3-turbo-ct2]
                                 [--port 8000] [--device cuda|cpu|auto]
@@ -15,7 +20,9 @@ import argparse
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
+from uuid import uuid4
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
@@ -27,8 +34,9 @@ for _dll_dir in (_NVIDIA_BASE / "cudnn" / "bin", _NVIDIA_BASE / "cublas" / "bin"
 
 import numpy as np  # noqa: E402
 import uvicorn  # noqa: E402
-from fastapi import FastAPI, File, Form, UploadFile  # noqa: E402
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile  # noqa: E402
 from faster_whisper import WhisperModel  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
 
 MODELS_ROOT = Path(__file__).resolve().parent / "models"
 
@@ -101,6 +109,194 @@ def transcribe(
     return {"text": text}
 
 
+# ---------------------------------------------------------------------------
+# 批量离线字幕：音视频文件 -> SRT（异步队列）
+# ---------------------------------------------------------------------------
+
+BATCH_JOBS: dict[str, dict] = {}
+_BATCH_LOCK = threading.Lock()
+_batch_worker_thread: threading.Thread | None = None
+_nllb_ready = False
+_nllb_lock = threading.Lock()
+
+
+class BatchRequest(BaseModel):
+    path: str
+    target_lang: str = "zh"
+    source_lang: str | None = None
+
+
+def _ensure_nllb() -> None:
+    """懒加载 NLLB 翻译模型（与实时字幕共用官方模型）。"""
+    global _nllb_ready
+    if _nllb_ready:
+        return
+    with _nllb_lock:
+        if _nllb_ready:
+            return
+        import nllb_server  # 同目录模块
+
+        nllb_server.load_model(Path(nllb_server.DEFAULT_MODEL_DIR), "auto")
+        _nllb_ready = True
+        log.info("NLLB 模型已加载（批量翻译）")
+
+
+def _decode_audio(path: str) -> np.ndarray:
+    """任意音视频 -> 16kHz 单声道 float32（PyAV 内置 FFmpeg）。"""
+    import av
+
+    container = av.open(path)
+    stream = container.streams.audio[0] if container.streams.audio else None
+    if stream is None:
+        raise RuntimeError("文件中没有音频轨")
+    resampler = av.AudioResampler(format="flt", layout="mono", rate=16000)
+    chunks: list[np.ndarray] = []
+    for frame in container.decode(stream):
+        for out in resampler.resample(frame):
+            chunks.append(out.to_ndarray())
+    if not chunks:
+        raise RuntimeError("解码后无音频数据")
+    audio = np.concatenate(chunks, axis=1)
+    if audio.ndim == 2:
+        audio = audio[0]
+    audio = np.asarray(audio, dtype=np.float32)
+    # 归一化（防止个别解码器输出超过 [-1,1]）
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak > 1.0:
+        audio = audio / peak
+    return audio
+
+
+def _fmt_ts(seconds: float) -> str:
+    ms = int(round(seconds * 1000))
+    h, rem = divmod(ms, 3600000)
+    m, rem = divmod(rem, 60000)
+    s, ms = divmod(rem, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _to_srt(items: list[dict], key: str) -> str:
+    lines: list[str] = []
+    for i, it in enumerate(items, start=1):
+        lines.append(str(i))
+        lines.append(f"{_fmt_ts(it['start'])} --> {_fmt_ts(it['end'])}")
+        lines.append(it.get(key) or "")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _process_batch_job(job: dict) -> None:
+    try:
+        src_path = Path(job["path"])
+        job["status"] = "解码音频"
+        audio = _decode_audio(str(src_path))
+        if audio.size < 16000:  # 不足 1 秒
+            raise RuntimeError("音频过短（<1 秒）")
+        duration = audio.size / 16000
+        job["duration"] = round(duration, 1)
+        log.info("[batch:%s] 音频时长 %.1fs，开始识别", job["id"], duration)
+
+        _ensure_nllb()
+        job["status"] = "识别中"
+        segments, info = _model.transcribe(
+            audio,
+            beam_size=5,
+            vad_filter=True,
+            condition_on_previous_text=False,
+        )
+        items: list[dict] = []
+        for seg in segments:
+            text = seg.text.strip()
+            if not text:
+                continue
+            items.append({"start": float(seg.start), "end": float(seg.end),
+                          "text": text, "translation": ""})
+            job["progress"] = round(min(0.5, seg.end / duration), 3)
+        if not items:
+            raise RuntimeError("未识别到任何语音（文件可能无人声）")
+        job["subtitle_count"] = len(items)
+
+        job["status"] = "翻译中"
+        from nllb_server import translate_text as nllb_translate
+
+        total = len(items)
+        for i, it in enumerate(items):
+            try:
+                it["translation"] = nllb_translate(
+                    it["text"], job.get("source_lang"), job["target_lang"])
+            except Exception:
+                it["translation"] = it["text"]
+            job["progress"] = round(0.5 + 0.5 * (i + 1) / total, 3)
+
+        # 写出字幕：同名 .srt（播放器自动加载，内容为译文）与 .orig.srt（原文）
+        base = src_path.with_suffix("")
+        trans_path = Path(str(base) + ".srt")
+        orig_path = Path(str(base) + ".orig.srt")
+        trans_path.write_text(_to_srt(items, "translation"), encoding="utf-8")
+        orig_path.write_text(_to_srt(items, "text"), encoding="utf-8")
+        job["srt_path"] = str(trans_path)
+        job["orig_srt_path"] = str(orig_path)
+        job["status"] = "完成"
+        job["progress"] = 1.0
+        log.info("[batch:%s] 完成: %s（%d 条字幕）", job["id"], trans_path, len(items))
+    except Exception as exc:  # noqa: BLE001
+        job["status"] = "失败"
+        job["error"] = str(exc)
+        log.exception("[batch:%s] 失败", job.get("id", "?"))
+
+
+def _batch_worker() -> None:
+    while True:
+        with _BATCH_LOCK:
+            pending = [j for j in BATCH_JOBS.values() if j["status"] == "排队中"]
+            job = pending[0] if pending else None
+        if job is None:
+            break
+        _process_batch_job(job)
+
+
+def _kick_worker() -> None:
+    global _batch_worker_thread
+    if _batch_worker_thread is None or not _batch_worker_thread.is_alive():
+        _batch_worker_thread = threading.Thread(target=_batch_worker, daemon=True)
+        _batch_worker_thread.start()
+
+
+@app.post("/batch/transcribe")
+def batch_transcribe(req: BatchRequest) -> dict:
+    src_path = Path(req.path)
+    if not src_path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在: " + req.path)
+    job_id = uuid4().hex[:12]
+    with _BATCH_LOCK:
+        BATCH_JOBS[job_id] = {
+            "id": job_id,
+            "path": str(src_path),
+            "file_name": src_path.name,
+            "status": "排队中",
+            "progress": 0.0,
+            "target_lang": req.target_lang,
+            "source_lang": req.source_lang,
+        }
+    _kick_worker()
+    return {"job_id": job_id}
+
+
+@app.get("/batch/status")
+def batch_status(job_id: str) -> dict:
+    with _BATCH_LOCK:
+        job = BATCH_JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="任务不存在: " + job_id)
+        return dict(job)
+
+
+@app.get("/batch/jobs")
+def batch_jobs() -> dict:
+    with _BATCH_LOCK:
+        return {"jobs": [dict(j) for j in BATCH_JOBS.values()]}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="faster-whisper local STT server")
     parser.add_argument("--model", default="deepdml/faster-whisper-large-v3-turbo-ct2",
@@ -112,7 +308,7 @@ def main() -> None:
     args = parser.parse_args()
 
     load_model(args.model, args.device, args.compute_type)
-    log.info("监听 http://127.0.0.1:%d（/health /v1/audio/transcriptions）", args.port)
+    log.info("监听 http://127.0.0.1:%d（/health /v1/audio/transcriptions /batch/*）", args.port)
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")
 
 

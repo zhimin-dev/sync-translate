@@ -40,6 +40,7 @@ dependencies:
   ffi: ^2.2.0
   http_parser: ^4.1.2
   tray_manager: ^0.5.3
+  file_picker: ^12.3.0
 
 dev_dependencies:
   flutter_test:
