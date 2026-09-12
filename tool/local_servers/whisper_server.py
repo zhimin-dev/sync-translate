@@ -175,6 +175,54 @@ def _fmt_ts(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
+# 字幕行内允许的最大静音间隔（秒）：超过即切分成新字幕，
+# 保证长停顿期间不显示任何字幕，下一句开始时才出现。
+_SUB_MAX_GAP_SECONDS = 1.2
+# 单条字幕最长时长（秒），防止句子过长挂屏
+_SUB_MAX_LINE_SECONDS = 8.0
+
+
+def _segments_to_lines(segments) -> list[dict]:
+    """把 whisper 片段按词级时间戳切分为"只在该句说话时段显示"的字幕行。"""
+    words: list[tuple[float, float, str]] = []
+    for seg in segments:
+        if seg.words:
+            for w in seg.words:
+                words.append((float(w.start), float(w.end), w.word))
+        else:
+            # 无词级时间戳时退化为整段
+            words.append((float(seg.start), float(seg.end), seg.text.strip()))
+    lines: list[dict] = []
+    cur_start = cur_end = 0.0
+    cur_words: list[str] = []
+    for start, end, word in words:
+        if not cur_words:
+            cur_start, cur_end = start, end
+            cur_words.append(word)
+            continue
+        gap = start - cur_end
+        line_len = start - cur_start
+        if gap > _SUB_MAX_GAP_SECONDS or line_len > _SUB_MAX_LINE_SECONDS:
+            lines.append(_make_line(cur_start, cur_end, cur_words))
+            cur_start, cur_end = start, end
+            cur_words = [word]
+        else:
+            cur_end = end
+            cur_words.append(word)
+    if cur_words:
+        lines.append(_make_line(cur_start, cur_end, cur_words))
+    return lines
+
+
+def _make_line(start: float, end: float, words: list[str]) -> dict:
+    text = "".join(words).strip()
+    if not text:
+        # 空格开头的单词拼接后首字符可能是空格，strip 处理
+        text = " ".join(w.strip() for w in words if w.strip())
+    return {"start": round(start, 3), "end": round(end, 3), "text": text,
+            "translation": ""}
+
+
 def _to_srt(items: list[dict], key: str) -> str:
     lines: list[str] = []
     for i, it in enumerate(items, start=1):
@@ -203,18 +251,17 @@ def _process_batch_job(job: dict) -> None:
             beam_size=5,
             vad_filter=True,
             condition_on_previous_text=False,
+            word_timestamps=True,
         )
-        items: list[dict] = []
-        for seg in segments:
-            text = seg.text.strip()
-            if not text:
-                continue
-            items.append({"start": float(seg.start), "end": float(seg.end),
-                          "text": text, "translation": ""})
-            job["progress"] = round(min(0.5, seg.end / duration), 3)
+        # 按词级时间戳切分：停顿超过阈值即断句，长停顿期间不显示字幕
+        items = _segments_to_lines(segments)
         if not items:
             raise RuntimeError("未识别到任何语音（文件可能无人声）")
         job["subtitle_count"] = len(items)
+        for it in items:
+            if it["end"] > duration:
+                it["end"] = round(duration, 3)
+            job["progress"] = round(min(0.5, it["end"] / duration), 3)
 
         job["status"] = "翻译中"
         from nllb_server import translate_text as nllb_translate

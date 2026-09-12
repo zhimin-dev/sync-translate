@@ -9,17 +9,17 @@ import httpx
 SAMPLE = r"D:\myweb\sync-translate\tool\speech_sample.wav"
 BASE = "http://127.0.0.1:8000"
 
-# 用 3 段语音拼接成一个"多句"音频，测试多字幕行
+# 语音 + 6 秒静音 + 语音：验证长停顿被切成两条独立字幕
 with wave.open(SAMPLE, "rb") as w:
     params = w.getparams()
     frames = w.readframes(w.getnframes())
-chunk = wave.open(SAMPLE, "rb")
-audio_bytes = b"".join([frames, frames])  # 重复两遍
+silence = b"\x00\x00" * (params.framerate * 6)
+audio_bytes = frames + silence + frames
 merged = r"D:\myweb\sync-translate\tool\speech_batch_test.wav"
 with wave.open(merged, "wb") as w:
     w.setparams(params)
     w.writeframes(audio_bytes)
-print(f"[1/3] 测试音频: {merged}（{len(audio_bytes) / params.framerate:.1f}s）")
+print(f"[1/3] 测试音频: {merged}（{len(audio_bytes) / params.framerate:.1f}s，含 6 秒静音）")
 
 resp = httpx.post(f"{BASE}/batch/transcribe",
                   json={"path": merged, "target_lang": "zh"}, timeout=30)
