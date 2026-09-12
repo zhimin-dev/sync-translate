@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -53,11 +53,11 @@ const List<ModelSpec> kSttModels = [
       files: ['config.json', 'model.bin', 'preprocessor_config.json', 'tokenizer.json', 'vocabulary.json']),
   // 云端
   ModelSpec('whisper-large-v3-turbo', 'whisper-large-v3-turbo（Groq）', 'stt',
-      remote: true, baseUrl: 'https://api.groq.com/openai/v1', files: const []),
+      remote: true, baseUrl: 'https://api.groq.com/openai/v1', files: []),
   ModelSpec('whisper-1', 'whisper-1（OpenAI）', 'stt',
-      remote: true, baseUrl: 'https://api.openai.com/v1', files: const []),
+      remote: true, baseUrl: 'https://api.openai.com/v1', files: []),
   ModelSpec('FunAudioLLM/SenseVoiceSmall', 'SenseVoiceSmall（SiliconFlow 国内）', 'stt',
-      remote: true, baseUrl: 'https://api.siliconflow.cn/v1', files: const []),
+      remote: true, baseUrl: 'https://api.siliconflow.cn/v1', files: []),
 ];
 
 /// 翻译（MT）模型目录。
@@ -70,11 +70,11 @@ const List<ModelSpec> kMtModels = [
           'tokenizer.json', 'tokenizer_config.json']),
   // 云端
   ModelSpec('deepseek-chat', 'deepseek-chat（DeepSeek）', 'mt',
-      remote: true, baseUrl: 'https://api.deepseek.com/v1', files: const []),
+      remote: true, baseUrl: 'https://api.deepseek.com/v1', files: []),
   ModelSpec('gpt-4o-mini', 'gpt-4o-mini（OpenAI）', 'mt',
-      remote: true, baseUrl: 'https://api.openai.com/v1', files: const []),
+      remote: true, baseUrl: 'https://api.openai.com/v1', files: []),
   ModelSpec('deepseek-ai/DeepSeek-V3', 'DeepSeek-V3（SiliconFlow 国内）', 'mt',
-      remote: true, baseUrl: 'https://api.siliconflow.cn/v1', files: const []),
+      remote: true, baseUrl: 'https://api.siliconflow.cn/v1', files: []),
 ];
 
 /// 模型下载管理器：选择未下载的本地模型后自动后台下载（断点续传），
@@ -182,3 +182,4 @@ class ModelManager {
     progress.value = map;
   }
 }
+
