@@ -77,7 +77,7 @@ class _SettingsViewState extends State<SettingsView> {
           !_sttBaseUrl.text.contains('127.0.0.1')) {
         // 切到本地引擎时自动填默认服务地址（免 Key）
         _sttBaseUrl.text = 'http://127.0.0.1:8000/v1';
-        _sttModel.text = 'deepdml/faster-whisper-large-v3-turbo-ct2';
+        _sttModel.text = 'Systran/faster-whisper-large-v3';
         _sttApiKey.text = '';
       }
     });
@@ -175,7 +175,7 @@ class _SettingsViewState extends State<SettingsView> {
                   _buildTextFormField(
                     controller: _sttModel,
                     label: '模型',
-                    hint: '云端：whisper-large-v3-turbo；本地：deepdml/faster-whisper-large-v3-turbo-ct2',
+                    hint: '云端：whisper-large-v3-turbo；本地：Systran/faster-whisper-large-v3（准确）或 deepdml/…-turbo-ct2（快）',
                   ),
                   const SizedBox(height: 8),
                   _languageDropdown(

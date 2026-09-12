@@ -130,6 +130,7 @@ class TranslationPipeline {
           '--device', 'auto',
         ],
         healthBase: _config.stt.baseUrl,
+        requiredModel: _config.stt.model,
       );
     }
     if (_config.translate.engine == 'nllb_local') {

@@ -45,11 +45,13 @@ log = logging.getLogger("whisper-server")
 
 app = FastAPI(title="faster-whisper local STT service")
 _model = None
+_model_id = ""
 _device_name = "not-loaded"
 
 
 def load_model(model_name: str, device: str, compute_type: str) -> None:
-    global _model, _device_name
+    global _model, _device_name, _model_id
+    _model_id = model_name
     # 优先用本地模型目录（download_models.ps1 下载），否则走 HF 仓库（hf-mirror）
     local_dir = MODELS_ROOT / Path(model_name).name
     src = str(local_dir) if local_dir.is_dir() else model_name
@@ -74,7 +76,7 @@ def load_model(model_name: str, device: str, compute_type: str) -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": _model is not None, "device": _device_name}
+    return {"ok": _model is not None, "device": _device_name, "model": _model_id}
 
 
 @app.post("/v1/audio/transcriptions")
@@ -250,7 +252,9 @@ def _process_batch_job(job: dict) -> None:
             audio,
             beam_size=5,
             vad_filter=True,
-            condition_on_previous_text=False,
+            # 离线批量启用跨句上下文（整段连贯转写，准确率更高；
+            # 实时字幕路径禁用是为了避免短段间重复幻觉）
+            condition_on_previous_text=True,
             word_timestamps=True,
         )
         # 按词级时间戳切分：停顿超过阈值即断句，长停顿期间不显示字幕
@@ -346,7 +350,7 @@ def batch_jobs() -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="faster-whisper local STT server")
-    parser.add_argument("--model", default="deepdml/faster-whisper-large-v3-turbo-ct2",
+    parser.add_argument("--model", default="Systran/faster-whisper-large-v3",
                         help="HF 模型名")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])

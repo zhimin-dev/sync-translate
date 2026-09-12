@@ -13,8 +13,9 @@ $targets = @(
                   'tokenizer.json', 'tokenizer_config.json')
     },
     @{
-        Repo = 'deepdml/faster-whisper-large-v3-turbo-ct2'
-        Dir  = Join-Path $modelsDir 'faster-whisper-large-v3-turbo-ct2'
+        # 准确率优先的完整版 large-v3；追求速度可换 deepdml/faster-whisper-large-v3-turbo-ct2
+        Repo = 'Systran/faster-whisper-large-v3'
+        Dir  = Join-Path $modelsDir 'faster-whisper-large-v3'
         Files = @('config.json', 'model.bin', 'preprocessor_config.json', 'tokenizer.json', 'vocabulary.json')
     }
 )

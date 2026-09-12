@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -74,15 +75,60 @@ class LocalServerManager {
     }
   }
 
-  /// 确保某个本地服务在运行：健康则直接返回 null；
-  /// 否则从项目 venv 后台拉起并等待就绪，返回新进程 PID。
+  /// 运行中服务当前加载的模型名（无则返回 null）。
+  static Future<String?> serverModel(String baseUrl) async {
+    try {
+      final resp = await http
+          .get(Uri.parse(_healthUrl(baseUrl)))
+          .timeout(const Duration(seconds: 3));
+      if (resp.statusCode == 200) {
+        final decoded = jsonDecode(resp.body);
+        if (decoded is Map<String, dynamic>) {
+          return decoded['model'] as String?;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static String _basename(String s) =>
+      s.split(RegExp(r'[\\/]')).last.toLowerCase();
+
+  /// 停止占用指定端口的进程（Windows；用于模型切换时重启服务）。
+  static Future<void> killPortListener(int port) async {
+    if (!Platform.isWindows) return;
+    try {
+      await Process.run('powershell', [
+        '-NoProfile', '-Command',
+        'Get-NetTCPConnection -LocalPort $port -State Listen '
+            '-ErrorAction SilentlyContinue | '
+            'Select-Object -ExpandProperty OwningProcess | '
+            'Sort-Object -Unique | ForEach-Object { Stop-Process -Id \$_ -Force }',
+      ]);
+    } catch (_) {}
+    await Future.delayed(const Duration(seconds: 2));
+  }
+
+  /// 确保某个本地服务在运行：健康且模型匹配则直接返回 null；
+  /// 模型不匹配则重启服务；未运行则从项目 venv 后台拉起并等待就绪，返回新进程 PID。
   /// 环境不完整（缺 venv/项目目录）时抛出带指引的 [LocalServerException]。
   Future<int?> ensureServerRunning({
     required String script,
     required List<String> args,
     required String healthBase,
+    String? requiredModel,
   }) async {
-    if (await isHealthy(healthBase)) return null;
+    if (await isHealthy(healthBase)) {
+      if (requiredModel == null) return null;
+      final current = await serverModel(healthBase);
+      final match = current != null &&
+          (_basename(current) == _basename(requiredModel));
+      if (match) return null;
+      // 配置的模型与运行中不一致：重启服务
+      final port = Uri.tryParse(healthBase)?.port;
+      if (port != null) await killPortListener(port);
+      if (await isHealthy(healthBase)) return null; // 未杀成则继续复用
+    }
 
     if (!Platform.isWindows) {
       throw LocalServerException(
