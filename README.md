@@ -14,6 +14,9 @@
 - 语音识别（可插拔）：**本地 faster-whisper（GPU 加速，免 Key）** / OpenAI 兼容接口（OpenAI / Groq / SiliconFlow…）
 - 翻译（可插拔）：**本地 NLLB-200（免 Key）** / LLM（DeepSeek / OpenAI / Ollama…）
 - 悬浮字幕：置顶、半透明、可拖动、**原文先行上屏**、译文随后补上、保留最近 N 条
+- **边听边出**：说话过程中每 ~0.8s 滚动更新草稿字幕，说完后最终结果覆盖
+- **离线批量字幕**：导入多个音视频 → 本地模型转写+翻译 → 生成同名 `.srt`（译文，播放器自动加载）+ `.orig.srt`（原文），异步排队处理
+- 系统托盘常驻：关闭窗口隐藏到托盘，右键托盘图标退出
 - 配置持久化：应用数据目录 `config.json`
 
 ## 快速开始（Windows）
@@ -98,6 +101,19 @@ powershell -ExecutionPolicy Bypass -File tool\local_servers\start_nllb.ps1     #
 | 翻译 | SiliconFlow（国内） | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V3` |
 
 点击 **开始监听**，窗口自动切换为悬浮字幕形态（置顶半透明，Esc 返回设置）。
+
+### 4. 离线批量字幕（音视频 → SRT）
+
+设置页底部「离线字幕（音视频 → SRT 批量翻译）」：
+
+1. 点 **添加音视频文件**（可多选，支持 mp4/mkv/avi/mov/wav/mp3/flac 等）
+2. 点 **开始批量翻译** → 本地服务自动拉起，任务排队异步处理（可关闭窗口，托盘常驻继续跑）
+3. 完成后在视频同目录生成：
+   - `<视频名>.srt` —— 译文字幕（PotPlayer 等播放器**自动加载**同名 srt）
+   - `<视频名>.orig.srt` —— 原文字幕（可手动加载对照）
+4. 每个任务显示进度（解码 → 识别 → 翻译），完成后可一键「打开目录」
+
+> 批量任务复用本地模型（faster-whisper + NLLB-200），完全离线；长视频按 GPU 速度约 10~50 倍实时处理。
 
 ## 目录结构
 
