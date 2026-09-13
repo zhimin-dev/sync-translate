@@ -10,10 +10,11 @@ import 'translator.dart';
 /// 兼容 OpenAI / DeepSeek / SiliconFlow / Ollama（http://localhost:11434/v1）等。
 ///
 /// 质量设计：
-/// - 字幕翻译专用 system 提示词（口语自然、保留语气、专名不译、术语一致）；
+/// - 字幕翻译专用 system 提示词（意译优先、通顺自然、保留语气、专名不译、术语一致）；
 /// - 支持把前几句已翻译字幕作为上下文一起发送（避免碎片句误译）；
 /// - 临时字幕（provisional）可用快速模型 [TranslatorConfig.fastModel]，最终字幕用主模型；
-/// - DeepSeek 官方 API 默认开启思考模式（慢且计费），这里显式关闭。
+/// - 可选思考模式（[TranslatorConfig.thinking]，仅 DeepSeek 官方 API、仅最终字幕）：
+///   先推理再输出，译文更通顺贴合语境，代价是更慢、推理 token 计费；默认关闭思考。
 class LlmTranslator implements Translator {
   @override
   String get id => 'llm';
@@ -53,19 +54,22 @@ class LlmTranslator implements Translator {
         'movies, TV shows and videos. Translate the user\'s message '
         '$sourceHint into "$target".\n'
         'Rules:\n'
-        '1. Sound natural and colloquial — like subtitles a native "$target" '
-        'speaker would read, not literal word-for-word translation.\n'
-        '2. Preserve the speaker\'s tone and emotion (surprise, sarcasm, '
+        '1. Translate the MEANING, not the words. Reorder clauses freely so '
+        'the result reads like natural, fluent movie subtitles in "$target" — '
+        'a native speaker should not be able to tell it was translated.\n'
+        '2. Prefer 意译 over literal translation: idioms, slang and '
+        'colloquial expressions should be rendered by their meaning.\n'
+        '3. Preserve the speaker\'s tone and emotion (surprise, sarcasm, '
         'politeness, honorifics, slang).\n'
-        '3. Keep proper nouns (person names, place names, brands) in their '
+        '4. Keep proper nouns (person names, place names, brands) in their '
         'original language.\n'
-        '4. Be concise: subtitles are short. Merge redundant words and drop '
+        '5. Be concise: subtitles are short. Merge redundant words and drop '
         'filler when it sounds natural.\n'
-        '5. Terminology, names and tone must stay consistent with the context '
+        '6. Terminology, names and tone must stay consistent with the context '
         'lines provided by the user.\n'
-        '6. Output ONLY the translation itself: no explanations, no quotes, '
+        '7. Output ONLY the translation itself: no explanations, no quotes, '
         'no extra text, no markdown.\n'
-        '7. If the text is already in "$target", output it unchanged.';
+        '8. If the text is already in "$target", output it unchanged.';
 
     // 带上文：前几句已翻译字幕（仅作上下文参考，不翻译它们）
     final userContent = (context == null || context.trim().isEmpty)
@@ -77,17 +81,29 @@ class LlmTranslator implements Translator {
         ? cfg.fastModel.trim()
         : cfg.model;
 
+    final isDeepSeek = base.contains('deepseek.com');
+    // 思考模式：仅 DeepSeek 官方 API、且仅最终字幕生效（临时字幕要快，不开）。
+    final useThinking = isDeepSeek && cfg.thinking && !provisional;
+
     final body = <String, dynamic>{
       'model': model,
       'messages': [
         {'role': 'system', 'content': systemPrompt},
         {'role': 'user', 'content': userContent},
       ],
-      'temperature': 0.2,
       'stream': false,
-      // DeepSeek 官方 API：默认思考模式（慢、计费 reasoning token），翻译场景关闭。
-      if (base.contains('deepseek.com'))
-        'thinking': {'type': 'disabled'},
+      if (useThinking) ...{
+        // 思考模式：先推理再输出（更通顺/更贴语境），temperature 不生效。
+        'thinking': {'type': 'enabled'},
+        'reasoning_effort': cfg.thinkingEffort == 'low'
+            ? 'low'
+            : (cfg.thinkingEffort == 'max' ? 'max' : 'high'),
+      } else ...{
+        'temperature': 0.2,
+        // DeepSeek 官方 API 默认开启思考模式（慢、计费 reasoning token），
+        // 非思考场景显式关闭。
+        if (isDeepSeek) 'thinking': {'type': 'disabled'},
+      },
     };
 
     final http.Response response;
@@ -101,9 +117,10 @@ class LlmTranslator implements Translator {
             },
             body: jsonEncode(body),
           )
-          .timeout(const Duration(seconds: 60));
+          .timeout(Duration(seconds: useThinking ? 180 : 60));
     } on TimeoutException {
-      throw TranslateException('翻译请求超时（60s）');
+      throw TranslateException(
+          '翻译请求超时（${useThinking ? 180 : 60}s）');
     } catch (e) {
       throw TranslateException('翻译网络错误: $e');
     }

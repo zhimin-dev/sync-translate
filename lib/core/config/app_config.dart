@@ -56,6 +56,8 @@ class TranslatorConfig {
     this.fastModel = 'deepseek-flash',
     this.sourceLang = 'auto',
     this.targetLang = 'zh',
+    this.thinking = false,
+    this.thinkingEffort = 'high',
   });
 
   /// 'llm'（OpenAI 兼容 chat/completions，含 Ollama 本地）| 'nllb_local'（预留）
@@ -70,6 +72,13 @@ class TranslatorConfig {
   String sourceLang;
   String targetLang;
 
+  /// 思考模式（仅 DeepSeek 官方 API 且仅最终字幕生效）：
+  /// 先推理再输出，译文更通顺、更贴合语境，但更慢、推理 token 也计费。
+  bool thinking;
+
+  /// 思考强度：'low' | 'high' | 'max'（DeepSeek reasoning_effort）
+  String thinkingEffort;
+
   Map<String, dynamic> toJson() => {
         'engine': engine,
         'baseUrl': baseUrl,
@@ -78,6 +87,8 @@ class TranslatorConfig {
         'fastModel': fastModel,
         'sourceLang': sourceLang,
         'targetLang': targetLang,
+        'thinking': thinking,
+        'thinkingEffort': thinkingEffort,
       };
 
   factory TranslatorConfig.fromJson(Map<String, dynamic> json) =>
@@ -89,6 +100,8 @@ class TranslatorConfig {
         fastModel: json['fastModel'] as String? ?? '',
         sourceLang: json['sourceLang'] as String? ?? 'auto',
         targetLang: json['targetLang'] as String? ?? 'zh',
+        thinking: json['thinking'] as bool? ?? false,
+        thinkingEffort: json['thinkingEffort'] as String? ?? 'high',
       );
 }
 

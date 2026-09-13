@@ -60,6 +60,8 @@ class _SettingsViewState extends State<SettingsView> {
   late bool _sttFast = widget.config.stt.fastInference;
   late String _trSourceLang = widget.config.translate.sourceLang;
   late String _trTargetLang = widget.config.translate.targetLang;
+  late bool _trThinking = widget.config.translate.thinking;
+  late String _trThinkingEffort = widget.config.translate.thinkingEffort;
 
   // 模型选择状态（模型优先，运行方式随模型自动判定；自定义时手动选）
   late String _sttChoice;
@@ -159,7 +161,9 @@ class _SettingsViewState extends State<SettingsView> {
       ..model = _trModel.text.trim()
       ..fastModel = _trFastModel.text.trim()
       ..sourceLang = _trSourceLang
-      ..targetLang = _trTargetLang;
+      ..targetLang = _trTargetLang
+      ..thinking = _trThinking
+      ..thinkingEffort = _trThinkingEffort;
   }
 
   Future<void> _save() async {
@@ -395,6 +399,32 @@ class _SettingsViewState extends State<SettingsView> {
                       label: '快速模型（临时字幕，可选）',
                       hint: '如 deepseek-flash；留空 = 与主模型相同',
                     ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('思考模式（更通顺，仅 DeepSeek）',
+                          style: TextStyle(fontSize: 14)),
+                      subtitle: Text(
+                        '最终字幕先推理再翻译：意译更自然、更贴合上下文，'
+                        '但更慢且推理 token 计费；临时字幕仍即时返回。',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      value: _trThinking,
+                      onChanged: (v) => setState(() => _trThinking = v),
+                    ),
+                    if (_trThinking) ...[
+                      const SizedBox(height: 4),
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(value: 'low', label: Text('低（较快）')),
+                          ButtonSegment(value: 'high', label: Text('高（推荐）')),
+                          ButtonSegment(value: 'max', label: Text('最高（最慢）')),
+                        ],
+                        selected: {_trThinkingEffort},
+                        onSelectionChanged: (s) =>
+                            setState(() => _trThinkingEffort = s.first),
+                      ),
+                    ],
                   ],
                   const SizedBox(height: 8),
                   Row(
