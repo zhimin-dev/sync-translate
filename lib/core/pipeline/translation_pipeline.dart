@@ -75,12 +75,15 @@ class TranslationPipeline {
   String _lastTranslatedPartialText = '';
   int _lastPartialTranslateMs = 0;
 
-  // 最近几句已完成的译文（供 LLM 翻译做上下文，保持术语/语气一致）
-  final List<String> _recentTranslations = [];
+  // 最近几句已完成的「原文 → 译文」对（供 LLM 翻译做上下文：
+  // 原文消解源语言歧义，译文保持术语/称呼一致）
+  final List<({String original, String translated})> _recentTranslations = [];
 
   String? get _mtContext {
     if (_recentTranslations.isEmpty) return null;
-    return _recentTranslations.join('\n');
+    return _recentTranslations
+        .map((e) => '${e.original} → ${e.translated}')
+        .join('\n');
   }
 
   Future<void> start() async {
@@ -260,7 +263,7 @@ class TranslationPipeline {
       ))
           .trim();
       _subtitles.add(SubtitleEntry(seq, text, translated, DateTime.now()));
-      _recentTranslations.add(translated);
+      _recentTranslations.add((original: text, translated: translated));
       if (_recentTranslations.length > 3) _recentTranslations.removeAt(0);
       state.value = const PipelineState(PipelinePhase.listening);
     } catch (e) {
