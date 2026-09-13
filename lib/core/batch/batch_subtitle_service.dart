@@ -19,6 +19,7 @@ class BatchSubtitleService {
     required String path,
     required String targetLang,
     String? sourceLang,
+    String? modelDir,
   }) async {
     final resp = await http
         .post(
@@ -29,6 +30,39 @@ class BatchSubtitleService {
             'target_lang': targetLang,
             if (sourceLang != null && sourceLang.isNotEmpty)
               'source_lang': sourceLang,
+            if (modelDir != null && modelDir.isNotEmpty) 'model_dir': modelDir,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (resp.statusCode != 200) {
+      throw Exception(
+          '提交失败 HTTP ${resp.statusCode}: ${_truncate(resp.body)}');
+    }
+    final decoded = jsonDecode(utf8.decode(resp.bodyBytes));
+    final id = (decoded as Map<String, dynamic>)['job_id'];
+    if (id is! String || id.isEmpty) {
+      throw Exception('提交失败：响应缺少 job_id');
+    }
+    return id;
+  }
+
+  /// 提交一个 SRT 文件到翻译队列（保留时间轴，仅翻译文本），返回任务 ID。
+  Future<String> submitSrt({
+    required String path,
+    required String targetLang,
+    String? sourceLang,
+    String? modelDir,
+  }) async {
+    final resp = await http
+        .post(
+          Uri.parse('$_base/batch/translate-srt'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'path': path,
+            'target_lang': targetLang,
+            if (sourceLang != null && sourceLang.isNotEmpty)
+              'source_lang': sourceLang,
+            if (modelDir != null && modelDir.isNotEmpty) 'model_dir': modelDir,
           }),
         )
         .timeout(const Duration(seconds: 30));
@@ -61,9 +95,12 @@ class BatchSubtitleService {
 
 /// 批量任务在应用侧的状态。
 class BatchItem {
-  BatchItem(this.path);
+  BatchItem(this.path, {this.kind = 'video'});
 
   final String path;
+
+  /// 'video'（视频转写）| 'srt'（纯字幕翻译）
+  final String kind;
   String? jobId;
   String status = '待提交';
   double progress = 0;
@@ -75,7 +112,8 @@ class BatchItem {
   String get fileName => path.split(RegExp(r'[\\/]')).last;
 
   bool get running => status == '排队中' || status == '解码音频' ||
-      status == '识别中' || status == '翻译中' || status == '待提交';
+      status == '识别中' || status == '翻译中' ||
+      status == '解析字幕' || status == '待提交';
 
   bool get done => status == '完成';
 
@@ -89,6 +127,8 @@ class BatchItem {
         return '解码音频中…';
       case '识别中':
         return '语音识别中…';
+      case '解析字幕':
+        return '解析字幕中…';
       case '翻译中':
         return '翻译中…';
       case '完成':

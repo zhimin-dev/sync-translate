@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../core/batch/batch_subtitle_service.dart';
 import '../core/config/app_config.dart';
+import '../core/model/model_manager.dart';
 import '../core/pipeline/local_server_manager.dart';
 
 /// 离线转换页：音视频批量转写+翻译，生成 SRT 字幕（异步队列）。
@@ -31,6 +32,7 @@ class _BatchViewState extends State<BatchView> {
   final List<BatchItem> _batchItems = [];
   Timer? _batchTimer;
   bool _batchSubmitting = false;
+  String _batchMode = 'video'; // 'video'（视频转写）| 'srt'（纯字幕翻译）
 
   @override
   void initState() {
@@ -46,19 +48,25 @@ class _BatchViewState extends State<BatchView> {
   }
 
   Future<void> _addBatchFiles() async {
-    final result = await FilePicker.pickFiles(type: FileType.any);
+    final isSrt = _batchMode == 'srt';
+    final result = isSrt
+        ? await FilePicker.pickFiles(
+            type: FileType.custom, allowedExtensions: ['srt'])
+        : await FilePicker.pickFiles(type: FileType.any);
     if (result.isEmpty) return;
     final existing = _batchItems.map((e) => e.path).toSet();
     final added = <BatchItem>[];
     for (final f in result) {
       if (f.path == null || existing.contains(f.path)) continue;
-      added.add(BatchItem(f.path!));
+      added.add(BatchItem(f.path!, kind: isSrt ? 'srt' : 'video'));
     }
     if (added.isNotEmpty) setState(() => _batchItems.addAll(added));
   }
 
   Future<void> _startBatch() async {
-    final pending = _batchItems.where((e) => e.jobId == null).toList();
+    final pending = _batchItems
+        .where((e) => e.jobId == null && e.kind == _batchMode)
+        .toList();
     if (pending.isEmpty) return;
     setState(() => _batchSubmitting = true);
     try {
@@ -74,14 +82,25 @@ class _BatchViewState extends State<BatchView> {
       );
       final service = BatchSubtitleService(baseUrl: sttBase);
       final targetLang = widget.config.translate.targetLang;
+      final modelDir =
+          ModelManager.modelDir('mt', widget.config.translate.model);
       for (final item in pending) {
         if (item.jobId != null) continue;
         item.status = '排队中';
         try {
-          item.jobId = await service.submit(
-            path: item.path,
-            targetLang: targetLang,
-          );
+          if (item.kind == 'srt') {
+            item.jobId = await service.submitSrt(
+              path: item.path,
+              targetLang: targetLang,
+              modelDir: modelDir,
+            );
+          } else {
+            item.jobId = await service.submit(
+              path: item.path,
+              targetLang: targetLang,
+              modelDir: modelDir,
+            );
+          }
         } catch (e) {
           item.status = '失败';
           item.error = '提交失败: $e';
@@ -157,17 +176,39 @@ class _BatchViewState extends State<BatchView> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
               children: [
-                const Text('离线转换（音视频 → SRT 批量翻译）',
+                const Text('离线转换（批量字幕）',
                     style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
                         color: Colors.blueGrey)),
                 const SizedBox(height: 6),
                 Text(
-                  '导入音视频文件，本地模型离线转写+翻译，生成同名 .srt 字幕'
-                  '（译文，播放器自动加载）与 .orig.srt（原文）。'
-                  '多文件排队异步处理，关闭窗口不影响（托盘常驻）。',
+                  _batchMode == 'srt'
+                      ? '导入现成的 .srt 字幕文件，本地模型直接翻译文本并保留时间轴，'
+                          '生成 <同名>.<目标语言>.srt 新字幕。'
+                          '多文件排队异步处理，关闭窗口不影响（托盘常驻）。'
+                      : '导入音视频文件，本地模型离线转写+翻译，生成同名 .srt 字幕'
+                          '（译文，播放器自动加载）与 .orig.srt（原文）。'
+                          '多文件排队异步处理，关闭窗口不影响（托盘常驻）。',
                   style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(
+                      value: 'video',
+                      label: Text('视频转写'),
+                      icon: Icon(Icons.movie_outlined),
+                    ),
+                    ButtonSegment(
+                      value: 'srt',
+                      label: Text('SRT 翻译'),
+                      icon: Icon(Icons.translate),
+                    ),
+                  ],
+                  selected: {_batchMode},
+                  onSelectionChanged: (sel) =>
+                      setState(() => _batchMode = sel.first),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -175,7 +216,9 @@ class _BatchViewState extends State<BatchView> {
                     OutlinedButton.icon(
                       onPressed: _batchSubmitting ? null : _addBatchFiles,
                       icon: const Icon(Icons.add),
-                      label: const Text('添加音视频文件（可多选）'),
+                      label: Text(_batchMode == 'srt'
+                          ? '添加 SRT 字幕文件（可多选）'
+                          : '添加音视频文件（可多选）'),
                     ),
                     const SizedBox(width: 12),
                     FilledButton.tonalIcon(
@@ -193,13 +236,17 @@ class _BatchViewState extends State<BatchView> {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 8),
-                if (_batchItems.isEmpty)
+                if (_batchItems.where((e) => e.kind == _batchMode).isEmpty)
                   Text(
-                    '尚未添加文件。支持 mp4/mkv/avi/mov/wav/mp3/flac 等常见格式。',
+                    _batchMode == 'srt'
+                        ? '尚未添加 SRT 文件。选择已有的字幕文件直接翻译，时间轴保持不变。'
+                        : '尚未添加文件。支持 mp4/mkv/avi/mov/wav/mp3/flac 等常见格式。',
                     style: Theme.of(context).textTheme.bodySmall,
                   )
                 else
-                  ..._batchItems.map((item) => _buildBatchTile(item)),
+                  ..._batchItems
+                      .where((e) => e.kind == _batchMode)
+                      .map((item) => _buildBatchTile(item)),
               ],
             ),
           ),
@@ -287,6 +334,7 @@ class _BatchViewState extends State<BatchView> {
       '排队中' => (Colors.orangeAccent, '排队中'),
       '解码音频' => (Colors.lightBlueAccent, '解码'),
       '识别中' => (Colors.lightBlueAccent, '识别中'),
+      '解析字幕' => (Colors.lightBlueAccent, '解析字幕'),
       '翻译中' => (Colors.amberAccent, '翻译中'),
       _ => (Colors.grey, item.statusText),
     };

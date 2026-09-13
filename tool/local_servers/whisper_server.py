@@ -19,6 +19,7 @@
 import argparse
 import logging
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -129,9 +130,17 @@ class BatchRequest(BaseModel):
     path: str
     target_lang: str = "zh"
     source_lang: str | None = None
+    model_dir: str | None = None
 
 
-def _ensure_nllb() -> None:
+class SrtTranslateRequest(BaseModel):
+    path: str
+    target_lang: str = "zh"
+    source_lang: str | None = None
+    model_dir: str | None = None
+
+
+def _ensure_nllb(model_dir: str | None = None) -> None:
     """懒加载 NLLB 翻译模型（与实时字幕共用官方模型）。"""
     global _nllb_ready
     if _nllb_ready:
@@ -141,9 +150,13 @@ def _ensure_nllb() -> None:
             return
         import nllb_server  # 同目录模块
 
-        nllb_server.load_model(Path(nllb_server.DEFAULT_MODEL_DIR), "auto")
+        target = Path(model_dir) if model_dir else Path(nllb_server.DEFAULT_MODEL_DIR)
+        if not (target / "pytorch_model.bin").exists() and \
+                not (target / "model.safetensors").exists():
+            target = Path(nllb_server.DEFAULT_MODEL_DIR)
+        nllb_server.load_model(target, "auto")
         _nllb_ready = True
-        log.info("NLLB 模型已加载（批量翻译）")
+        log.info("NLLB 模型已加载（批量翻译）: %s", target)
 
 
 def _assemble_audio(frames: list[tuple[float, np.ndarray]],
@@ -300,7 +313,7 @@ def _process_batch_job(job: dict) -> None:
         else:
             log.info("[batch:%s] 音频时长 %.1fs，开始识别", job["id"], duration)
 
-        _ensure_nllb()
+        _ensure_nllb(job.get("model_dir"))
         job["status"] = "识别中"
         segments, info = _model.transcribe(
             audio,
@@ -350,6 +363,85 @@ def _process_batch_job(job: dict) -> None:
         log.exception("[batch:%s] 失败", job.get("id", "?"))
 
 
+def _parse_ts(s: str) -> float:
+    """'HH:MM:SS,mmm' -> 秒"""
+    h, m, rest = s.split(":")
+    sec, ms = rest.replace(",", ".").split(".")
+    return int(h) * 3600 + int(m) * 60 + int(sec) + int(ms.ljust(3, "0")) / 1000
+
+
+def _parse_srt(content: str) -> list[dict]:
+    """解析标准 SRT，返回 [{start, end, text}]（保留原始时间轴）。"""
+    entries: list[dict] = []
+    lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    i = 0
+    while i < len(lines):
+        if not lines[i].strip():
+            i += 1
+            continue
+        i += 1  # 跳过序号行
+        if i >= len(lines):
+            break
+        m = re.match(
+            r"(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*"
+            r"(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})",
+            lines[i].strip())
+        if not m:
+            i += 1
+            continue
+        i += 1
+        text_lines: list[str] = []
+        while i < len(lines) and lines[i].strip():
+            text_lines.append(lines[i].strip())
+            i += 1
+        if text_lines:
+            entries.append({
+                "start": _parse_ts(m.group(1)),
+                "end": _parse_ts(m.group(2)),
+                "text": "\n".join(text_lines),
+                "translation": "",
+            })
+    return entries
+
+
+def _process_srt_job(job: dict) -> None:
+    """纯 SRT 翻译：保留时间轴，只翻译文本行。"""
+    src_path = Path(job["path"])
+    job["status"] = "解析字幕"
+    content = src_path.read_text(encoding="utf-8-sig", errors="replace")
+    entries = _parse_srt(content)
+    if not entries:
+        raise RuntimeError("未解析到任何字幕条目（文件可能不是标准 SRT 格式）")
+    job["subtitle_count"] = len(entries)
+    _ensure_nllb(job.get("model_dir"))
+    job["status"] = "翻译中"
+    from nllb_server import translate_text as nllb_translate
+
+    total = len(entries)
+    for i, e in enumerate(entries):
+        try:
+            e["translation"] = nllb_translate(
+                e["text"], job.get("source_lang"), job["target_lang"])
+        except Exception:
+            e["translation"] = e["text"]
+        job["progress"] = round((i + 1) / total, 3)
+
+    out_path = Path(str(src_path.with_suffix("")) +
+                    f".{job['target_lang']}.srt")
+    lines: list[str] = []
+    for i, e in enumerate(entries, start=1):
+        lines.append(str(i))
+        lines.append(f"{_fmt_ts(e['start'])} --> {_fmt_ts(e['end'])}")
+        lines.append(e["translation"])
+        lines.append("")
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    job["srt_path"] = str(out_path)
+    job["status"] = "完成"
+    job["progress"] = 1.0
+    log.info("[batch:%s] SRT 翻译完成: %s（%d 条）",
+             job["id"], out_path, len(entries))
+
+
 def _batch_worker() -> None:
     while True:
         with _BATCH_LOCK:
@@ -357,7 +449,15 @@ def _batch_worker() -> None:
             job = pending[0] if pending else None
         if job is None:
             break
-        _process_batch_job(job)
+        try:
+            if job.get("type") == "srt":
+                _process_srt_job(job)
+            else:
+                _process_batch_job(job)
+        except Exception as exc:  # noqa: BLE001
+            job["status"] = "失败"
+            job["error"] = str(exc)
+            log.exception("[batch:%s] 失败", job.get("id", "?"))
 
 
 def _kick_worker() -> None:
@@ -382,6 +482,30 @@ def batch_transcribe(req: BatchRequest) -> dict:
             "progress": 0.0,
             "target_lang": req.target_lang,
             "source_lang": req.source_lang,
+            "model_dir": req.model_dir,
+            "type": "video",
+        }
+    _kick_worker()
+    return {"job_id": job_id}
+
+
+@app.post("/batch/translate-srt")
+def batch_translate_srt(req: SrtTranslateRequest) -> dict:
+    src_path = Path(req.path)
+    if not src_path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在: " + req.path)
+    job_id = uuid4().hex[:12]
+    with _BATCH_LOCK:
+        BATCH_JOBS[job_id] = {
+            "id": job_id,
+            "path": str(src_path),
+            "file_name": src_path.name,
+            "status": "排队中",
+            "progress": 0.0,
+            "target_lang": req.target_lang,
+            "source_lang": req.source_lang,
+            "model_dir": req.model_dir,
+            "type": "srt",
         }
     _kick_worker()
     return {"job_id": job_id}
