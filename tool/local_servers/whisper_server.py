@@ -47,11 +47,13 @@ app = FastAPI(title="faster-whisper local STT service")
 _model = None
 _model_id = ""
 _device_name = "not-loaded"
+_compute_type = ""
 
 
 def load_model(model_name: str, device: str, compute_type: str) -> None:
-    global _model, _device_name, _model_id
+    global _model, _device_name, _model_id, _compute_type
     _model_id = model_name
+    _compute_type = compute_type
     # 优先用本地模型目录（download_models.ps1 下载），否则走 HF 仓库（hf-mirror）
     local_dir = MODELS_ROOT / Path(model_name).name
     src = str(local_dir) if local_dir.is_dir() else model_name
@@ -76,7 +78,8 @@ def load_model(model_name: str, device: str, compute_type: str) -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": _model is not None, "device": _device_name, "model": _model_id}
+    return {"ok": _model is not None, "device": _device_name,
+            "model": _model_id, "compute_type": _compute_type}
 
 
 @app.post("/v1/audio/transcriptions")

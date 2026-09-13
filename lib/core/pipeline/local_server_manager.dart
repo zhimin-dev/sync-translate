@@ -91,6 +91,22 @@ class LocalServerManager {
     return null;
   }
 
+  /// 运行中服务的推理精度（compute_type，无则返回 null）。
+  static Future<String?> serverComputeType(String baseUrl) async {
+    try {
+      final resp = await http
+          .get(Uri.parse(_healthUrl(baseUrl)))
+          .timeout(const Duration(seconds: 3));
+      if (resp.statusCode == 200) {
+        final decoded = jsonDecode(resp.body);
+        if (decoded is Map<String, dynamic>) {
+          return decoded['compute_type'] as String?;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   static String _basename(String s) =>
       s.split(RegExp(r'[\\/]')).last.toLowerCase();
 
@@ -109,24 +125,33 @@ class LocalServerManager {
     await Future.delayed(const Duration(seconds: 2));
   }
 
-  /// 确保某个本地服务在运行：健康且模型匹配则直接返回 null；
-  /// 模型不匹配则重启服务；未运行则从项目 venv 后台拉起并等待就绪，返回新进程 PID。
+  /// 确保某个本地服务在运行：健康且模型/推理精度匹配则直接返回 null；
+  /// 不匹配则重启服务；未运行则从项目 venv 后台拉起并等待就绪，返回新进程 PID。
   /// 环境不完整（缺 venv/项目目录）时抛出带指引的 [LocalServerException]。
   Future<int?> ensureServerRunning({
     required String script,
     required List<String> args,
     required String healthBase,
     String? requiredModel,
+    String? requiredCompute,
   }) async {
     if (await isHealthy(healthBase)) {
-      if (requiredModel == null) return null;
+      if (requiredModel == null && requiredCompute == null) return null;
       final current = await serverModel(healthBase);
-      final need = _basename(requiredModel);
+      final need = _basename(requiredModel ?? '');
       // 服务上报的是模型目录：basename 相等或以 "--<模型名>" 结尾即匹配
-      final match = current != null &&
-          (_basename(current) == need || _basename(current).endsWith('--$need'));
-      if (match) return null;
-      // 配置的模型与运行中不一致：重启服务
+      final modelMatch = requiredModel == null ||
+          (current != null &&
+              (_basename(current) == need ||
+                  _basename(current).endsWith('--$need')));
+      var computeMatch = true;
+      if (requiredCompute != null) {
+        final currentCompute = await serverComputeType(healthBase);
+        computeMatch = (currentCompute ?? '').toLowerCase() ==
+            requiredCompute.toLowerCase();
+      }
+      if (modelMatch && computeMatch) return null;
+      // 配置的模型/推理精度与运行中不一致：重启服务
       final port = Uri.tryParse(healthBase)?.port;
       if (port != null) await killPortListener(port);
       if (await isHealthy(healthBase)) return null; // 未杀成则继续复用

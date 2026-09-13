@@ -11,6 +11,7 @@ class SttConfig {
     this.apiKey = '',
     this.model = 'whisper-large-v3-turbo',
     this.language = 'auto',
+    this.fastInference = false,
   });
 
   /// 'openai_compat' | 'whisper_local'（本地预留）
@@ -22,12 +23,16 @@ class SttConfig {
   /// 识别语言提示，'auto' = 自动检测
   String language;
 
+  /// 本地识别速度优先：int8_float16 量化推理（约快 1.5~2 倍，准度略降）
+  bool fastInference;
+
   Map<String, dynamic> toJson() => {
         'engine': engine,
         'baseUrl': baseUrl,
         'apiKey': apiKey,
         'model': model,
         'language': language,
+        'fastInference': fastInference,
       };
 
   factory SttConfig.fromJson(Map<String, dynamic> json) => SttConfig(
@@ -37,6 +42,7 @@ class SttConfig {
         apiKey: json['apiKey'] as String? ?? '',
         model: json['model'] as String? ?? 'whisper-large-v3-turbo',
         language: json['language'] as String? ?? 'auto',
+        fastInference: json['fastInference'] as bool? ?? false,
       );
 }
 

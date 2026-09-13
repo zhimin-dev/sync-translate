@@ -129,15 +129,19 @@ class TranslationPipeline {
             '请到「设置」页选择该模型并点击下载（支持断点续传），'
             '或等待后台下载完成后再试。');
       }
+      final computeType =
+          _config.stt.fastInference ? 'int8_float16' : 'float16';
       await manager.ensureServerRunning(
         script: 'whisper_server.py',
         args: [
           '--model', _config.stt.model,
           '--port', '$port',
           '--device', 'auto',
+          '--compute-type', computeType,
         ],
         healthBase: _config.stt.baseUrl,
         requiredModel: _config.stt.model,
+        requiredCompute: computeType,
       );
     }
     if (_config.translate.engine == 'nllb_local') {

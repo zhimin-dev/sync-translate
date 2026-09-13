@@ -55,6 +55,7 @@ class _SettingsViewState extends State<SettingsView> {
       TextEditingController(text: widget.config.translate.model);
 
   late String _sttLanguage = widget.config.stt.language;
+  late bool _sttFast = widget.config.stt.fastInference;
   late String _trSourceLang = widget.config.translate.sourceLang;
   late String _trTargetLang = widget.config.translate.targetLang;
 
@@ -144,7 +145,8 @@ class _SettingsViewState extends State<SettingsView> {
       ..baseUrl = _sttBaseUrl.text.trim()
       ..apiKey = _sttApiKey.text.trim()
       ..model = _sttModel.text.trim()
-      ..language = _sttLanguage;
+      ..language = _sttLanguage
+      ..fastInference = _sttFast;
     c.translate
       ..engine = (trSpec != null)
           ? (trSpec.remote ? 'llm' : 'nllb_local')
@@ -238,6 +240,19 @@ class _SettingsViewState extends State<SettingsView> {
                     ),
                   if (sttSpec != null && !sttSpec.remote)
                     _buildDownloadStatus('stt', sttSpec.name),
+                  if (sttSpec != null && !sttSpec.remote)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('速度优先（int8 量化）',
+                          style: TextStyle(fontSize: 14)),
+                      subtitle: Text(
+                        '推理约快 1.5~2 倍，识别准度略降（切换后下次开始监听自动重启服务生效）',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      value: _sttFast,
+                      onChanged: (v) => setState(() => _sttFast = v),
+                    ),
                   if (sttSpec == null)
                     _buildTextFormField(
                       controller: _sttModel,
