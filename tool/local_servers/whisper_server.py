@@ -146,6 +146,36 @@ def _ensure_nllb() -> None:
         log.info("NLLB 模型已加载（批量翻译）")
 
 
+def _assemble_audio(frames: list[tuple[float, np.ndarray]],
+                    sample_rate: int) -> np.ndarray:
+    """按 PTS 起始时间拼装音频帧：起始偏移与帧间空隙补静音，
+    保证音频时间轴严格对应视频时间轴（避免后半段字幕漂移）。"""
+    chunks: list[np.ndarray] = []
+    expected_next: float | None = None
+
+    def push_silence(seconds: float) -> None:
+        n = int(round(seconds * sample_rate))
+        if n > 0:
+            chunks.append(np.zeros(n, dtype=np.float32))
+
+    for start, pcm in frames:
+        dur = pcm.size / sample_rate
+        if expected_next is None:
+            if start > 0.05:
+                push_silence(start)
+        elif start > expected_next + 0.05:
+            push_silence(start - expected_next)
+        expected_next = start + dur
+        chunks.append(np.asarray(pcm, dtype=np.float32))
+    if not chunks:
+        return np.zeros(0, dtype=np.float32)
+    audio = np.concatenate(chunks)
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak > 1.0:
+        audio = audio / peak
+    return audio
+
+
 def _decode_audio(path: str) -> np.ndarray:
     """任意音视频 -> 16kHz 单声道 float32（PyAV 内置 FFmpeg）。"""
     import av
@@ -155,21 +185,24 @@ def _decode_audio(path: str) -> np.ndarray:
     if stream is None:
         raise RuntimeError("文件中没有音频轨")
     resampler = av.AudioResampler(format="flt", layout="mono", rate=16000)
-    chunks: list[np.ndarray] = []
+    frames: list[tuple[float, np.ndarray]] = []
     for frame in container.decode(stream):
+        # 帧在视频时间轴上的起始时间（秒）
+        start = (float(frame.pts * frame.time_base)
+                 if frame.pts is not None and frame.time_base is not None
+                 else 0.0)
+        parts: list[np.ndarray] = []
         for out in resampler.resample(frame):
-            chunks.append(out.to_ndarray())
-    if not chunks:
+            parts.append(out.to_ndarray())
+        if not parts:
+            continue
+        pcm = np.concatenate(parts, axis=1)
+        if pcm.ndim == 2:
+            pcm = pcm[0]
+        frames.append((start, np.asarray(pcm, dtype=np.float32)))
+    if not frames:
         raise RuntimeError("解码后无音频数据")
-    audio = np.concatenate(chunks, axis=1)
-    if audio.ndim == 2:
-        audio = audio[0]
-    audio = np.asarray(audio, dtype=np.float32)
-    # 归一化（防止个别解码器输出超过 [-1,1]）
-    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
-    if peak > 1.0:
-        audio = audio / peak
-    return audio
+    return _assemble_audio(frames, 16000)
 
 
 def _fmt_ts(seconds: float) -> str:
@@ -238,16 +271,34 @@ def _to_srt(items: list[dict], key: str) -> str:
     return "\n".join(lines)
 
 
+def _media_duration(path: str) -> float | None:
+    """容器总时长（秒）；无法获取时返回 None。"""
+    try:
+        import av
+        container = av.open(path)
+        if container.duration is not None:
+            return float(container.duration / av.time_base)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def _process_batch_job(job: dict) -> None:
     try:
         src_path = Path(job["path"])
         job["status"] = "解码音频"
+        video_duration = _media_duration(str(src_path))
         audio = _decode_audio(str(src_path))
         if audio.size < 16000:  # 不足 1 秒
             raise RuntimeError("音频过短（<1 秒）")
         duration = audio.size / 16000
         job["duration"] = round(duration, 1)
-        log.info("[batch:%s] 音频时长 %.1fs，开始识别", job["id"], duration)
+        if video_duration is not None:
+            job["video_duration"] = round(video_duration, 1)
+            log.info("[batch:%s] 视频 %.1fs / 音频 %.1fs",
+                     job["id"], video_duration, duration)
+        else:
+            log.info("[batch:%s] 音频时长 %.1fs，开始识别", job["id"], duration)
 
         _ensure_nllb()
         job["status"] = "识别中"
