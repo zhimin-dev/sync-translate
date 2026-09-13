@@ -25,7 +25,10 @@ class LocalTranslator implements Translator {
 
   @override
   Future<String> translate(String text,
-      {String? sourceLang, String? targetLang}) async {
+      {String? sourceLang,
+      String? targetLang,
+      String? context,
+      bool provisional = false}) async {
     final cfg = _config;
     if (cfg == null) throw StateError('翻译引擎未初始化');
     final base = cfg.baseUrl.replaceAll(RegExp(r'/+$'), '');

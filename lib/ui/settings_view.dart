@@ -53,6 +53,8 @@ class _SettingsViewState extends State<SettingsView> {
       TextEditingController(text: widget.config.translate.apiKey);
   late final TextEditingController _trModel =
       TextEditingController(text: widget.config.translate.model);
+  late final TextEditingController _trFastModel =
+      TextEditingController(text: widget.config.translate.fastModel);
 
   late String _sttLanguage = widget.config.stt.language;
   late bool _sttFast = widget.config.stt.fastInference;
@@ -90,6 +92,7 @@ class _SettingsViewState extends State<SettingsView> {
     _trBaseUrl.dispose();
     _trApiKey.dispose();
     _trModel.dispose();
+    _trFastModel.dispose();
     super.dispose();
   }
 
@@ -154,6 +157,7 @@ class _SettingsViewState extends State<SettingsView> {
       ..baseUrl = _trBaseUrl.text.trim()
       ..apiKey = _trApiKey.text.trim()
       ..model = _trModel.text.trim()
+      ..fastModel = _trFastModel.text.trim()
       ..sourceLang = _trSourceLang
       ..targetLang = _trTargetLang;
   }
@@ -353,7 +357,7 @@ class _SettingsViewState extends State<SettingsView> {
                       label: '模型名',
                       hint: trIsLocal
                           ? '本地：facebook/nllb-200-distilled-600M'
-                          : '云端：deepseek-chat / gpt-4o-mini',
+                          : '云端：deepseek-v4-pro / deepseek-flash / gpt-4o-mini',
                     ),
                   const SizedBox(height: 8),
                   _buildTextFormField(
@@ -384,6 +388,12 @@ class _SettingsViewState extends State<SettingsView> {
                               setState(() => _obscureTrKey = !_obscureTrKey),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+                    _buildTextFormField(
+                      controller: _trFastModel,
+                      label: '快速模型（临时字幕，可选）',
+                      hint: '如 deepseek-flash；留空 = 与主模型相同',
                     ),
                   ],
                   const SizedBox(height: 8),

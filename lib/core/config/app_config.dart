@@ -52,7 +52,8 @@ class TranslatorConfig {
     this.engine = 'llm',
     this.baseUrl = 'https://api.deepseek.com/v1',
     this.apiKey = '',
-    this.model = 'deepseek-chat',
+    this.model = 'deepseek-v4-pro',
+    this.fastModel = 'deepseek-flash',
     this.sourceLang = 'auto',
     this.targetLang = 'zh',
   });
@@ -62,6 +63,10 @@ class TranslatorConfig {
   String baseUrl;
   String apiKey;
   String model;
+
+  /// 快速模型（可选）：临时字幕（边听边出）的翻译用它，
+  /// 最终字幕用 [model]。留空 = 与主模型相同。
+  String fastModel;
   String sourceLang;
   String targetLang;
 
@@ -70,6 +75,7 @@ class TranslatorConfig {
         'baseUrl': baseUrl,
         'apiKey': apiKey,
         'model': model,
+        'fastModel': fastModel,
         'sourceLang': sourceLang,
         'targetLang': targetLang,
       };
@@ -79,7 +85,8 @@ class TranslatorConfig {
         engine: json['engine'] as String? ?? 'llm',
         baseUrl: json['baseUrl'] as String? ?? 'https://api.deepseek.com/v1',
         apiKey: json['apiKey'] as String? ?? '',
-        model: json['model'] as String? ?? 'deepseek-chat',
+        model: json['model'] as String? ?? 'deepseek-v4-pro',
+        fastModel: json['fastModel'] as String? ?? '',
         sourceLang: json['sourceLang'] as String? ?? 'auto',
         targetLang: json['targetLang'] as String? ?? 'zh',
       );

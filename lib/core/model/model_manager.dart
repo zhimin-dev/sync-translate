@@ -74,7 +74,9 @@ const List<ModelSpec> kMtModels = [
           'sentencepiece.bpe.model', 'special_tokens_map.json',
           'tokenizer.json', 'tokenizer_config.json']),
   // 云端
-  ModelSpec('deepseek-chat', 'deepseek-chat（DeepSeek）', 'mt',
+  ModelSpec('deepseek-v4-pro', 'deepseek-v4-pro（DeepSeek 高质量）', 'mt',
+      remote: true, baseUrl: 'https://api.deepseek.com/v1', files: []),
+  ModelSpec('deepseek-flash', 'deepseek-flash（DeepSeek 快速便宜）', 'mt',
       remote: true, baseUrl: 'https://api.deepseek.com/v1', files: []),
   ModelSpec('gpt-4o-mini', 'gpt-4o-mini（OpenAI）', 'mt',
       remote: true, baseUrl: 'https://api.openai.com/v1', files: []),

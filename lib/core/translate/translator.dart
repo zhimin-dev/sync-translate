@@ -9,7 +9,13 @@ abstract class Translator {
   Future<void> init(TranslatorConfig config);
 
   /// 翻译一段文本。[sourceLang]/[targetLang] 为 ISO 639-1 提示，null 表示用配置值。
-  Future<String> translate(String text, {String? sourceLang, String? targetLang});
+  /// [context]：已翻译的相邻字幕（供理解上下文，可选）。
+  /// [provisional]：true = 边听边出的临时字幕（可用更快/便宜的模型）。
+  Future<String> translate(String text,
+      {String? sourceLang,
+      String? targetLang,
+      String? context,
+      bool provisional = false});
 
   Future<void> dispose();
 }

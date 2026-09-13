@@ -75,6 +75,14 @@ class TranslationPipeline {
   String _lastTranslatedPartialText = '';
   int _lastPartialTranslateMs = 0;
 
+  // 最近几句已完成的译文（供 LLM 翻译做上下文，保持术语/语气一致）
+  final List<String> _recentTranslations = [];
+
+  String? get _mtContext {
+    if (_recentTranslations.isEmpty) return null;
+    return _recentTranslations.join('\n');
+  }
+
   Future<void> start() async {
     if (state.value.phase == PipelinePhase.listening ||
         state.value.phase == PipelinePhase.starting) {
@@ -203,6 +211,8 @@ class TranslationPipeline {
             text,
             sourceLang: _mtSourceLanguage,
             targetLang: _mtTargetLanguage,
+            context: _mtContext,
+            provisional: true,
           ))
               .trim();
           if (reqSeq < _latestAppliedPartial) return; // 期间已有更新结果
@@ -246,9 +256,12 @@ class TranslationPipeline {
         text,
         sourceLang: _mtSourceLanguage,
         targetLang: _mtTargetLanguage,
+        context: _mtContext,
       ))
           .trim();
       _subtitles.add(SubtitleEntry(seq, text, translated, DateTime.now()));
+      _recentTranslations.add(translated);
+      if (_recentTranslations.length > 3) _recentTranslations.removeAt(0);
       state.value = const PipelineState(PipelinePhase.listening);
     } catch (e) {
       // 单段失败不中断采集，继续听；错误展示在状态栏。
@@ -265,6 +278,7 @@ class TranslationPipeline {
     _segSub = null;
     _partialSub = null;
     _errSub = null;
+    _recentTranslations.clear();
     await _capture?.stop();
     _capture = null;
     final segmenter = _segmenter;
