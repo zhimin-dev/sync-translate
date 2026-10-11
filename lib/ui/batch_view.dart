@@ -152,6 +152,7 @@ class _BatchViewState extends State<BatchView> {
         item.srtPath = s['srt_path'] as String?;
         item.origSrtPath = s['orig_srt_path'] as String?;
         item.error = s['error'] as String?;
+        item.warning = s['warning'] as String?;
         item.duration = (s['duration'] as num?)?.toDouble();
         anyUpdate = true;
       } catch (_) {
@@ -328,6 +329,13 @@ class _BatchViewState extends State<BatchView> {
                 ],
               ),
             ],
+            if (item.warning != null && item.warning!.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                item.warning!,
+                style: const TextStyle(color: Colors.amberAccent, fontSize: 12),
+              ),
+            ],
             if (item.error != null && item.error!.isNotEmpty) ...[
               const SizedBox(height: 4),
               Text(
@@ -349,7 +357,9 @@ class _BatchViewState extends State<BatchView> {
 
   Widget _batchStatusBadge(BatchItem item) {
     final (color, text) = switch (item.status) {
-      '完成' => (Colors.greenAccent, '完成'),
+      '完成' => item.warning != null && item.warning!.isNotEmpty
+          ? (Colors.amberAccent, '完成（有待补译）')
+          : (Colors.greenAccent, '完成'),
       '失败' => (Colors.redAccent, '失败'),
       '排队中' => (Colors.orangeAccent, '排队中'),
       '解码音频' => (Colors.lightBlueAccent, '解码'),

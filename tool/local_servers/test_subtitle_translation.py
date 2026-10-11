@@ -104,12 +104,52 @@ class SubtitleTranslationTest(unittest.TestCase):
             chat.assert_not_called()
             self.assertEqual(items[0]["translation"], "译文")
 
-    def test_local_failure_and_empty_translation_are_not_swallowed(self):
-        for local in (Mock(side_effect=RuntimeError("model failed")), Mock(return_value="")):
-            items = subtitles(1)
-            with self.assertRaises(RuntimeError):
-                mt.translate_subtitles(items, None, None, "zh", local_translate=local)
-            self.assertEqual(items[0]["translation"], "")
+    def test_local_inference_failure_is_not_swallowed(self):
+        items = subtitles(1)
+        with self.assertRaisesRegex(RuntimeError, "model failed"):
+            mt.translate_subtitles(items, None, None, "zh",
+                                   local_translate=Mock(side_effect=RuntimeError("model failed")))
+        self.assertEqual(items[0]["translation"], "")
+
+    def test_empty_local_translation_retries_then_continues(self):
+        for empty in ("", " \n\t", None):
+            for config in (None, {"engine": "nllb_local"}):
+                with self.subTest(empty=empty, config=config):
+                    items = subtitles(93)
+                    progress, warnings = [], []
+                    local = Mock(side_effect=lambda text, *_:
+                                 empty if text == "source 91" else "译文 " + text)
+                    mt.translate_subtitles(
+                        items, config, "ja", "zh", local_translate=local,
+                        on_progress=progress.append,
+                        on_warning=lambda index, reason: warnings.append((index, reason)))
+                    self.assertEqual(local.call_count, 94)
+                    self.assertEqual(items[90]["translation"], "source 91")
+                    self.assertEqual(items[91]["translation"], "译文 source 92")
+                    self.assertEqual(items[92]["translation"], "译文 source 93")
+                    self.assertEqual(len(progress), 93)
+                    self.assertEqual(progress[-1], 1)
+                    self.assertEqual(len(warnings), 1)
+                    self.assertEqual(warnings[0][0], 91)
+                    self.assertIn("保留原文", warnings[0][1])
+
+    def test_local_retry_recovery_does_not_warn(self):
+        items = subtitles(2)
+        local = Mock(side_effect=["", "重试成功", "下一条译文"])
+        warning = Mock()
+        mt.translate_subtitles(items, None, None, "zh", local_translate=local,
+                               on_warning=warning)
+        self.assertEqual([item["translation"] for item in items], ["重试成功", "下一条译文"])
+        warning.assert_not_called()
+
+    def test_all_empty_local_results_preserve_every_cue(self):
+        items = subtitles(3)
+        warning = Mock()
+        mt.translate_subtitles(items, None, None, "zh", local_translate=Mock(return_value=""),
+                               on_warning=warning)
+        self.assertEqual([item["translation"] for item in items],
+                         [item["text"] for item in items])
+        self.assertEqual([call.args[0] for call in warning.call_args_list], [1, 2, 3])
 
     def test_selected_model_key_and_thinking_are_sent(self):
         for base in ("https://api.deepseek.com/v1", "https://example.test/v1"):

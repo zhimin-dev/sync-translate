@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 import numpy as np
 
 import subtitle_translation as mt
-from test_subtitle_translation import CONFIG, reply
+from test_subtitle_translation import CONFIG, reply, subtitles
 
 
 class BatchTranslationTest(unittest.TestCase):
@@ -123,6 +123,33 @@ class BatchTranslationTest(unittest.TestCase):
             "path": str(self.source), "translator": dict(CONFIG, model="")})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.server.BATCH_JOBS, {})
+
+    def test_empty_91st_cue_exports_complete_srt_with_warning(self):
+        entries = subtitles(93)
+        self.source.write_text(self.server._to_srt(entries, "text"), encoding="utf-8")
+        original = self.source.read_bytes()
+        job_id = self.submit(translator={"engine": "nllb_local"})
+        local_module = types.ModuleType("nllb_server")
+        local_module.translate_text = Mock(side_effect=lambda text, *_:
+                                           "" if text == "source 91" else "译文 " + text)
+        with patch.dict(sys.modules, {"nllb_server": local_module}), \
+                patch.object(self.server, "_ensure_nllb"):
+            self.server._batch_worker()
+        job = self.client.get("/batch/status", params={"job_id": job_id}).json()
+        self.assertEqual(job["status"], "完成")
+        self.assertEqual(job["progress"], 1)
+        self.assertNotIn("error", job)
+        self.assertEqual(job["untranslated_indices"], [91])
+        self.assertEqual(job["warning_count"], 1)
+        self.assertIn("第 91 条", job["warning"])
+        translated = self.server._parse_srt(Path(job["srt_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(len(translated), 93)
+        self.assertEqual(translated[90]["text"], "source 91")
+        self.assertEqual(translated[91]["text"], "译文 source 92")
+        self.assertEqual(translated[92]["text"], "译文 source 93")
+        self.assertEqual([(row["start"], row["end"]) for row in translated],
+                         [(row["start"], row["end"]) for row in entries])
+        self.assertEqual(self.source.read_bytes(), original)
 
 
 if __name__ == "__main__":

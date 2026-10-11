@@ -125,8 +125,8 @@ def _parse_translation(content: str, ids: list[int]) -> dict[int, str]:
 
 def translate_subtitles(items: list[dict], config: dict | None,
                         source_lang: str | None, target_lang: str,
-                        local_translate=None, on_progress=None) -> None:
-    """Translate in place; only validated batches are applied, timestamps stay intact."""
+                        local_translate=None, on_progress=None, on_warning=None) -> None:
+    """Translate in place; empty local results retain source with an explicit warning."""
     validate_config(config)
     if not items:
         return
@@ -134,10 +134,16 @@ def translate_subtitles(items: list[dict], config: dict | None,
         if local_translate is None:
             raise TranslationError("本地翻译引擎未初始化")
         for i, item in enumerate(items):
-            text = local_translate(item["text"], source_lang, target_lang)
+            for _ in range(2):
+                text = local_translate(item["text"], source_lang, target_lang)
+                if isinstance(text, str) and text.strip():
+                    break
             if not isinstance(text, str) or not text.strip():
-                raise TranslationError(f"第 {i + 1} 条字幕返回空译文")
-            item["translation"] = text.strip()
+                item["translation"] = item["text"]
+                if on_warning:
+                    on_warning(i + 1, "重试后仍为空译文，已保留原文")
+            else:
+                item["translation"] = text.strip()
             if on_progress:
                 on_progress((i + 1) / len(items))
         return

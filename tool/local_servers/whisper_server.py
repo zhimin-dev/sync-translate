@@ -453,8 +453,20 @@ def _translate_job_items(job: dict, items: list[dict], source_lang: str | None,
     def progress(fraction: float) -> None:
         job["progress"] = round(progress_start + (1 - progress_start) * fraction, 3)
 
+    def warning(index: int, reason: str) -> None:
+        indices = job.setdefault("untranslated_indices", [])
+        indices.append(index)
+        job["warning_count"] = len(indices)
+        preview = "、".join(str(i) for i in indices[:10])
+        if len(indices) > 10:
+            preview += "等"
+        job["warning"] = (f"{len(indices)} 条字幕未能翻译，已保留原文"
+                          f"（第 {preview} 条），其余字幕继续处理。")
+        log.warning("[batch:%s] 第 %d 条字幕：%s", job.get("id", "?"), index, reason)
+
     translate_subtitles(items, config, source_lang, job["target_lang"],
-                        local_translate=local_translate, on_progress=progress)
+                        local_translate=local_translate, on_progress=progress,
+                        on_warning=warning)
 
 
 def _request_translator(req) -> dict | None:

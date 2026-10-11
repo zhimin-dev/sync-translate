@@ -130,6 +130,7 @@ class BatchItem {
   String? srtPath;
   String? origSrtPath;
   String? error;
+  String? warning;
   double? duration;
 
   String get fileName => path.split(RegExp(r'[\\/]')).last;
