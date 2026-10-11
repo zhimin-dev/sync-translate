@@ -70,11 +70,14 @@ class _BatchViewState extends State<BatchView> {
     if (pending.isEmpty) return;
     setState(() => _batchSubmitting = true);
     try {
-      final sttBase = widget.config.stt.baseUrl;
+      // Batch endpoints always run locally, even when live STT uses a cloud API.
+      final sttBase = _batchBaseUrl;
       await LocalServerManager.instance.ensureServerRunning(
         script: 'whisper_server.py',
         args: [
-          '--model', widget.config.stt.model,
+          '--model', widget.config.stt.engine == 'whisper_local'
+              ? widget.config.stt.model
+              : 'Systran/faster-whisper-large-v3',
           '--port', '${Uri.tryParse(sttBase)?.port ?? 8000}',
           '--device', 'auto',
         ],
@@ -82,8 +85,10 @@ class _BatchViewState extends State<BatchView> {
       );
       final service = BatchSubtitleService(baseUrl: sttBase);
       final targetLang = widget.config.translate.targetLang;
-      final modelDir =
-          ModelManager.modelDir('mt', widget.config.translate.model);
+      final translator = widget.config.translate;
+      final modelDir = translator.engine == 'nllb_local'
+          ? ModelManager.modelDir('mt', translator.model)
+          : null;
       for (final item in pending) {
         if (item.jobId != null) continue;
         item.status = '排队中';
@@ -93,12 +98,16 @@ class _BatchViewState extends State<BatchView> {
               path: item.path,
               targetLang: targetLang,
               modelDir: modelDir,
+              sourceLang: translator.sourceLang,
+              translator: translator,
             );
           } else {
             item.jobId = await service.submit(
               path: item.path,
               targetLang: targetLang,
               modelDir: modelDir,
+              sourceLang: translator.sourceLang,
+              translator: translator,
             );
           }
         } catch (e) {
@@ -113,6 +122,10 @@ class _BatchViewState extends State<BatchView> {
       if (mounted) setState(() => _batchSubmitting = false);
     }
   }
+
+  String get _batchBaseUrl => widget.config.stt.engine == 'whisper_local'
+      ? widget.config.stt.baseUrl
+      : 'http://127.0.0.1:8000/v1';
 
   void _ensureBatchPolling() {
     if (_batchTimer != null) return;
@@ -129,7 +142,7 @@ class _BatchViewState extends State<BatchView> {
       return;
     }
     final service =
-        BatchSubtitleService(baseUrl: widget.config.stt.baseUrl);
+        BatchSubtitleService(baseUrl: _batchBaseUrl);
     var anyUpdate = false;
     for (final item in running) {
       try {
@@ -149,7 +162,7 @@ class _BatchViewState extends State<BatchView> {
   }
 
   void _openBatchFolder(BatchItem item) {
-    final p = item.srtPath ?? item.path;
+    final p = item.srtPath ?? item.origSrtPath ?? item.path;
     final dir = File(p).parent.path;
     Process.start('explorer', ['/select,', p])
         .catchError((_) => Process.start('explorer', [dir]));
@@ -176,7 +189,7 @@ class _BatchViewState extends State<BatchView> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
               children: [
-                const Text('离线转换（批量字幕）',
+                const Text('批量字幕翻译',
                     style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -184,10 +197,10 @@ class _BatchViewState extends State<BatchView> {
                 const SizedBox(height: 6),
                 Text(
                   _batchMode == 'srt'
-                      ? '导入现成的 .srt 字幕文件，本地模型直接翻译文本并保留时间轴，'
+                      ? '导入现成的 .srt 字幕文件，使用设置中的翻译模型并保留时间轴，'
                           '生成 <同名>.<目标语言>.srt 新字幕。'
                           '多文件排队异步处理，关闭窗口不影响（托盘常驻）。'
-                      : '导入音视频文件，本地模型离线转写+翻译，生成同名 .srt 字幕'
+                      : '导入音视频文件，本地识别后使用所选翻译模型，生成同名 .srt 字幕'
                           '（译文，播放器自动加载）与 .orig.srt（原文）。'
                           '多文件排队异步处理，关闭窗口不影响（托盘常驻）。',
                   style: Theme.of(context).textTheme.bodySmall,
@@ -232,7 +245,8 @@ class _BatchViewState extends State<BatchView> {
                 const SizedBox(height: 8),
                 Text(
                   '目标语言：${widget.config.translate.targetLang}'
-                  '（可在设置页修改翻译目标语言）',
+                  ' · 模型：${widget.config.translate.model}\n'
+                  '${widget.config.translate.engine == 'llm' ? 'AI 按段翻译并参考前后文；字幕文本将发送至所配置的 API。' : '本地 NLLB 逐条翻译；有上下文需求时可在设置中切换 AI 模型。'}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 8),
@@ -320,6 +334,12 @@ class _BatchViewState extends State<BatchView> {
                 item.error!,
                 style: const TextStyle(color: Colors.redAccent, fontSize: 12),
               ),
+              if (item.origSrtPath != null)
+                TextButton.icon(
+                  onPressed: () => _openBatchFolder(item),
+                  icon: const Icon(Icons.folder_open, size: 16),
+                  label: const Text('原字幕已保存，打开目录后可导入 SRT 重新翻译'),
+                ),
             ],
           ],
         ),

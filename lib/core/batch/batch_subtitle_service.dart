@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../config/app_config.dart';
+
 /// 批量离线字幕服务客户端（后端 = whisper_server.py 的 /batch/* 接口）。
 class BatchSubtitleService {
   BatchSubtitleService({required this.baseUrl});
@@ -14,13 +16,30 @@ class BatchSubtitleService {
     return '${uri.scheme}://${uri.authority}';
   }
 
+  Future<void> _checkTranslatorSupport(TranslatorConfig? translator) async {
+    if (translator == null || translator.engine != 'llm') return;
+    final response = await http
+        .get(Uri.parse('$_base/health'))
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      final capabilities = data is Map ? data['capabilities'] : null;
+      if (capabilities is List &&
+          capabilities.contains('context_translation_v1')) return;
+    }
+    throw Exception('本地字幕服务版本过旧，请重启 whisper_server.py 后再翻译，'
+        '以确保使用所选 AI 模型。');
+  }
+
   /// 提交一个音视频文件到批量队列，返回任务 ID。
   Future<String> submit({
     required String path,
     required String targetLang,
     String? sourceLang,
     String? modelDir,
+    TranslatorConfig? translator,
   }) async {
+    await _checkTranslatorSupport(translator);
     final resp = await http
         .post(
           Uri.parse('$_base/batch/transcribe'),
@@ -28,6 +47,7 @@ class BatchSubtitleService {
           body: jsonEncode({
             'path': path,
             'target_lang': targetLang,
+            if (translator != null) 'translator': translator.toJson(),
             if (sourceLang != null && sourceLang.isNotEmpty)
               'source_lang': sourceLang,
             if (modelDir != null && modelDir.isNotEmpty) 'model_dir': modelDir,
@@ -52,7 +72,9 @@ class BatchSubtitleService {
     required String targetLang,
     String? sourceLang,
     String? modelDir,
+    TranslatorConfig? translator,
   }) async {
+    await _checkTranslatorSupport(translator);
     final resp = await http
         .post(
           Uri.parse('$_base/batch/translate-srt'),
@@ -60,6 +82,7 @@ class BatchSubtitleService {
           body: jsonEncode({
             'path': path,
             'target_lang': targetLang,
+            if (translator != null) 'translator': translator.toJson(),
             if (sourceLang != null && sourceLang.isNotEmpty)
               'source_lang': sourceLang,
             if (modelDir != null && modelDir.isNotEmpty) 'model_dir': modelDir,

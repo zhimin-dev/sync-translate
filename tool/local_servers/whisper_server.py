@@ -37,7 +37,9 @@ import numpy as np  # noqa: E402
 import uvicorn  # noqa: E402
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile  # noqa: E402
 from faster_whisper import WhisperModel  # noqa: E402
-from pydantic import BaseModel  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+
+from subtitle_translation import translate_subtitles, validate_config, TranslationError
 
 MODELS_ROOT = Path(__file__).resolve().parent / "models"
 
@@ -80,7 +82,8 @@ def load_model(model_name: str, device: str, compute_type: str) -> None:
 @app.get("/health")
 def health() -> dict:
     return {"ok": _model is not None, "device": _device_name,
-            "model": _model_id, "compute_type": _compute_type}
+            "model": _model_id, "compute_type": _compute_type,
+            "capabilities": ["context_translation_v1"]}
 
 
 @app.post("/v1/audio/transcriptions")
@@ -126,11 +129,22 @@ _nllb_ready = False
 _nllb_lock = threading.Lock()
 
 
+class TranslatorSettings(BaseModel):
+    engine: str = "llm"
+    baseUrl: str = ""
+    apiKey: str = Field(default="", repr=False)
+    model: str = ""
+    thinking: bool = False
+    thinkingEffort: str = "high"
+    translationGuide: str = ""
+
+
 class BatchRequest(BaseModel):
     path: str
     target_lang: str = "zh"
     source_lang: str | None = None
     model_dir: str | None = None
+    translator: TranslatorSettings | None = None
 
 
 class SrtTranslateRequest(BaseModel):
@@ -138,6 +152,7 @@ class SrtTranslateRequest(BaseModel):
     target_lang: str = "zh"
     source_lang: str | None = None
     model_dir: str | None = None
+    translator: TranslatorSettings | None = None
 
 
 def _ensure_nllb(model_dir: str | None = None) -> None:
@@ -313,10 +328,10 @@ def _process_batch_job(job: dict) -> None:
         else:
             log.info("[batch:%s] 音频时长 %.1fs，开始识别", job["id"], duration)
 
-        _ensure_nllb(job.get("model_dir"))
         job["status"] = "识别中"
         segments, info = _model.transcribe(
             audio,
+            language=job.get("source_lang") if job.get("source_lang") not in (None, "", "auto") else None,
             beam_size=5,
             vad_filter=True,
             # 离线批量启用跨句上下文（整段连贯转写，准确率更高；
@@ -334,24 +349,18 @@ def _process_batch_job(job: dict) -> None:
                 it["end"] = round(duration, 3)
             job["progress"] = round(min(0.5, it["end"] / duration), 3)
 
-        job["status"] = "翻译中"
-        from nllb_server import translate_text as nllb_translate
-
-        total = len(items)
-        for i, it in enumerate(items):
-            try:
-                it["translation"] = nllb_translate(
-                    it["text"], job.get("source_lang"), job["target_lang"])
-            except Exception:
-                it["translation"] = it["text"]
-            job["progress"] = round(0.5 + 0.5 * (i + 1) / total, 3)
-
-        # 写出字幕：同名 .srt（播放器自动加载，内容为译文）与 .orig.srt（原文）
+        # Preserve the successful transcription even when translation fails.
         base = src_path.with_suffix("")
         trans_path = Path(str(base) + ".srt")
         orig_path = Path(str(base) + ".orig.srt")
-        trans_path.write_text(_to_srt(items, "translation"), encoding="utf-8")
         orig_path.write_text(_to_srt(items, "text"), encoding="utf-8")
+        job["orig_srt_path"] = str(orig_path)
+        source = job.get("source_lang")
+        if source in (None, "", "auto"):
+            source = info.language
+        _translate_job_items(job, items, source, progress_start=0.5)
+
+        trans_path.write_text(_to_srt(items, "translation"), encoding="utf-8")
         job["srt_path"] = str(trans_path)
         job["orig_srt_path"] = str(orig_path)
         job["status"] = "完成"
@@ -413,18 +422,7 @@ def _process_srt_job(job: dict) -> None:
     if not entries:
         raise RuntimeError("未解析到任何字幕条目（文件可能不是标准 SRT 格式）")
     job["subtitle_count"] = len(entries)
-    _ensure_nllb(job.get("model_dir"))
-    job["status"] = "翻译中"
-    from nllb_server import translate_text as nllb_translate
-
-    total = len(entries)
-    for i, e in enumerate(entries):
-        try:
-            e["translation"] = nllb_translate(
-                e["text"], job.get("source_lang"), job["target_lang"])
-        except Exception:
-            e["translation"] = e["text"]
-        job["progress"] = round((i + 1) / total, 3)
+    _translate_job_items(job, entries, job.get("source_lang"))
 
     out_path = Path(str(src_path.with_suffix("")) +
                     f".{job['target_lang']}.srt")
@@ -440,6 +438,37 @@ def _process_srt_job(job: dict) -> None:
     job["progress"] = 1.0
     log.info("[batch:%s] SRT 翻译完成: %s（%d 条）",
              job["id"], out_path, len(entries))
+
+
+def _translate_job_items(job: dict, items: list[dict], source_lang: str | None,
+                         progress_start: float = 0.0) -> None:
+    config = job.get("_translator")
+    local_translate = None
+    job["status"] = "翻译中"
+    if config is None or config["engine"] == "nllb_local":
+        _ensure_nllb(job.get("model_dir"))
+        from nllb_server import translate_text
+        local_translate = translate_text
+
+    def progress(fraction: float) -> None:
+        job["progress"] = round(progress_start + (1 - progress_start) * fraction, 3)
+
+    translate_subtitles(items, config, source_lang, job["target_lang"],
+                        local_translate=local_translate, on_progress=progress)
+
+
+def _request_translator(req) -> dict | None:
+    config = req.translator.model_dump() if req.translator else None
+    try:
+        validate_config(config)
+    except TranslationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return config
+
+
+def _public_job(job: dict) -> dict:
+    # Never return provider credentials in polling/list responses.
+    return {key: value for key, value in job.items() if not key.startswith("_")}
 
 
 def _batch_worker() -> None:
@@ -458,6 +487,8 @@ def _batch_worker() -> None:
             job["status"] = "失败"
             job["error"] = str(exc)
             log.exception("[batch:%s] 失败", job.get("id", "?"))
+        finally:
+            job.pop("_translator", None)
 
 
 def _kick_worker() -> None:
@@ -472,6 +503,7 @@ def batch_transcribe(req: BatchRequest) -> dict:
     src_path = Path(req.path)
     if not src_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在: " + req.path)
+    translator = _request_translator(req)
     job_id = uuid4().hex[:12]
     with _BATCH_LOCK:
         BATCH_JOBS[job_id] = {
@@ -483,6 +515,7 @@ def batch_transcribe(req: BatchRequest) -> dict:
             "target_lang": req.target_lang,
             "source_lang": req.source_lang,
             "model_dir": req.model_dir,
+            "_translator": translator,
             "type": "video",
         }
     _kick_worker()
@@ -494,6 +527,7 @@ def batch_translate_srt(req: SrtTranslateRequest) -> dict:
     src_path = Path(req.path)
     if not src_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在: " + req.path)
+    translator = _request_translator(req)
     job_id = uuid4().hex[:12]
     with _BATCH_LOCK:
         BATCH_JOBS[job_id] = {
@@ -505,6 +539,7 @@ def batch_translate_srt(req: SrtTranslateRequest) -> dict:
             "target_lang": req.target_lang,
             "source_lang": req.source_lang,
             "model_dir": req.model_dir,
+            "_translator": translator,
             "type": "srt",
         }
     _kick_worker()
@@ -517,13 +552,13 @@ def batch_status(job_id: str) -> dict:
         job = BATCH_JOBS.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="任务不存在: " + job_id)
-        return dict(job)
+        return _public_job(job)
 
 
 @app.get("/batch/jobs")
 def batch_jobs() -> dict:
     with _BATCH_LOCK:
-        return {"jobs": [dict(j) for j in BATCH_JOBS.values()]}
+        return {"jobs": [_public_job(j) for j in BATCH_JOBS.values()]}
 
 
 def main() -> None:

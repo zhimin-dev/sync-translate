@@ -58,6 +58,7 @@ class TranslatorConfig {
     this.targetLang = 'zh',
     this.thinking = false,
     this.thinkingEffort = 'high',
+    this.translationGuide = '',
   });
 
   /// 'llm'（OpenAI 兼容 chat/completions，含 Ollama 本地）| 'nllb_local'（预留）
@@ -79,6 +80,9 @@ class TranslatorConfig {
   /// 思考强度：'low' | 'high' | 'max'（DeepSeek reasoning_effort）
   String thinkingEffort;
 
+  /// 可选的视频背景、人物称呼、术语约定；用于 LLM 实时和批量翻译。
+  String translationGuide;
+
   Map<String, dynamic> toJson() => {
         'engine': engine,
         'baseUrl': baseUrl,
@@ -89,6 +93,7 @@ class TranslatorConfig {
         'targetLang': targetLang,
         'thinking': thinking,
         'thinkingEffort': thinkingEffort,
+        'translationGuide': translationGuide,
       };
 
   factory TranslatorConfig.fromJson(Map<String, dynamic> json) =>
@@ -102,6 +107,7 @@ class TranslatorConfig {
         targetLang: json['targetLang'] as String? ?? 'zh',
         thinking: json['thinking'] as bool? ?? false,
         thinkingEffort: json['thinkingEffort'] as String? ?? 'high',
+        translationGuide: json['translationGuide'] as String? ?? '',
       );
 }
 

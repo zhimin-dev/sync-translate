@@ -55,6 +55,8 @@ class _SettingsViewState extends State<SettingsView> {
       TextEditingController(text: widget.config.translate.model);
   late final TextEditingController _trFastModel =
       TextEditingController(text: widget.config.translate.fastModel);
+  late final TextEditingController _trGuide =
+      TextEditingController(text: widget.config.translate.translationGuide);
 
   late String _sttLanguage = widget.config.stt.language;
   late bool _sttFast = widget.config.stt.fastInference;
@@ -95,6 +97,7 @@ class _SettingsViewState extends State<SettingsView> {
     _trApiKey.dispose();
     _trModel.dispose();
     _trFastModel.dispose();
+    _trGuide.dispose();
     super.dispose();
   }
 
@@ -163,7 +166,8 @@ class _SettingsViewState extends State<SettingsView> {
       ..sourceLang = _trSourceLang
       ..targetLang = _trTargetLang
       ..thinking = _trThinking
-      ..thinkingEffort = _trThinkingEffort;
+      ..thinkingEffort = _trThinkingEffort
+      ..translationGuide = _trGuide.text.trim();
   }
 
   Future<void> _save() async {
@@ -398,6 +402,19 @@ class _SettingsViewState extends State<SettingsView> {
                       controller: _trFastModel,
                       label: '快速模型（临时字幕，可选）',
                       hint: '如 deepseek-flash；留空 = 与主模型相同',
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _trGuide,
+                      minLines: 3,
+                      maxLines: 6,
+                      decoration: const InputDecoration(
+                        labelText: '视频背景与术语约定（可选）',
+                        hintText: '例如：这是一段编程教程，语气简洁准确。\n'
+                            '术语：render → 渲染；hook → 钩子。',
+                        helperText: '用于实时和批量 AI 翻译；更换视频主题时请同步修改。',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
