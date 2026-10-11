@@ -15,7 +15,52 @@ migrate_working_dir/
 # Local model servers
 tool/local_servers/venv/
 tool/local_servers/models/
+tool/local_servers/logs/
 __pycache__/
+# Python 运行环境/缓存
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Python 依赖包与模型权重（体积巨大，用脚本按需下载，绝不入库）
+*.whl
+*.tar.gz
+*.zip
+*.safetensors
+*.ckpt
+*.onnx
+*.gguf
+*.pt
+*.bin
+
+# 本地测试媒体/字幕产物（离线转换的输出不该进仓库）
+tool/media/
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.flv
+*.wmv
+*.m4a
+*.wav.tmp
+*_test_srt/
+
+# 密钥/本地配置（切勿提交 API Key）
+.env
+.env.*
+*.local.json
+secrets.json
+
+# 编辑器/系统垃圾文件
+.vscode/
+Thumbs.db
+desktop.ini
+*.bak
+*.tmp
+*.orig
+*.rej
 
 # IntelliJ related
 *.iml
