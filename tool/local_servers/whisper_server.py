@@ -83,7 +83,7 @@ def load_model(model_name: str, device: str, compute_type: str) -> None:
 def health() -> dict:
     return {"ok": _model is not None, "device": _device_name,
             "model": _model_id, "compute_type": _compute_type,
-            "capabilities": ["context_translation_v1"]}
+            "capabilities": ["context_translation_v1", "translation_review_v1"]}
 
 
 @app.post("/v1/audio/transcriptions")
@@ -137,6 +137,7 @@ class TranslatorSettings(BaseModel):
     thinking: bool = False
     thinkingEffort: str = "high"
     translationGuide: str = ""
+    batchReview: bool = True
 
 
 class BatchRequest(BaseModel):
@@ -445,28 +446,38 @@ def _translate_job_items(job: dict, items: list[dict], source_lang: str | None,
     config = job.get("_translator")
     local_translate = None
     job["status"] = "翻译中"
+    job["translation_engine"] = config["engine"] if config else "nllb_local"
+    job["translation_model"] = config["model"] if config and config["engine"] == "llm" else "NLLB"
+    job["translation_review"] = bool(config and config["engine"] == "llm"
+                                   and config.get("batchReview", True))
     if config is None or config["engine"] == "nllb_local":
         _ensure_nllb(job.get("model_dir"))
         from nllb_server import translate_text
         local_translate = translate_text
+        import nllb_server
+        job["translation_model"] = getattr(nllb_server, "_model_name", "NLLB") or "NLLB"
+    log.info("[batch:%s] 翻译引擎=%s 请求模型=%s 校对=%s", job.get("id", "?"),
+             job["translation_engine"], job["translation_model"], job["translation_review"])
 
     def progress(fraction: float) -> None:
         job["progress"] = round(progress_start + (1 - progress_start) * fraction, 3)
 
-    def warning(index: int, reason: str) -> None:
-        indices = job.setdefault("untranslated_indices", [])
-        indices.append(index)
-        job["warning_count"] = len(indices)
-        preview = "、".join(str(i) for i in indices[:10])
-        if len(indices) > 10:
-            preview += "等"
-        job["warning"] = (f"{len(indices)} 条字幕未能翻译，已保留原文"
-                          f"（第 {preview} 条），其余字幕继续处理。")
+    def warning(index: int, reason: str, *, untranslated: bool = True) -> None:
+        if untranslated:
+            job.setdefault("untranslated_indices", []).append(index)
+        warnings = job.setdefault("translation_warnings", [])
+        warnings.append({"index": index, "reason": reason})
+        job["warning_count"] = len(warnings)
+        preview = "；".join(f"第 {w['index']} 条：{w['reason']}" for w in warnings[:3])
+        job["warning"] = f"{len(warnings)} 项翻译提示：{preview}"
+        if len(warnings) > 3:
+            job["warning"] += "；其余条目见任务状态记录。"
         log.warning("[batch:%s] 第 %d 条字幕：%s", job.get("id", "?"), index, reason)
 
     translate_subtitles(items, config, source_lang, job["target_lang"],
                         local_translate=local_translate, on_progress=progress,
-                        on_warning=warning)
+                        on_warning=warning,
+                        on_quality_warning=lambda i, reason: warning(i, reason, untranslated=False))
 
 
 def _request_translator(req) -> dict | None:

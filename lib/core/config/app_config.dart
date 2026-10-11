@@ -59,6 +59,7 @@ class TranslatorConfig {
     this.thinking = false,
     this.thinkingEffort = 'high',
     this.translationGuide = '',
+    this.batchReview = true,
   });
 
   /// 'llm'（OpenAI 兼容 chat/completions，含 Ollama 本地）| 'nllb_local'（预留）
@@ -83,6 +84,9 @@ class TranslatorConfig {
   /// 可选的视频背景、人物称呼、术语约定；用于 LLM 实时和批量翻译。
   String translationGuide;
 
+  /// 批量 AI 翻译后再对照原文校对一次；增加请求耗时和费用。
+  bool batchReview;
+
   Map<String, dynamic> toJson() => {
         'engine': engine,
         'baseUrl': baseUrl,
@@ -94,6 +98,7 @@ class TranslatorConfig {
         'thinking': thinking,
         'thinkingEffort': thinkingEffort,
         'translationGuide': translationGuide,
+        'batchReview': batchReview,
       };
 
   factory TranslatorConfig.fromJson(Map<String, dynamic> json) =>
@@ -108,6 +113,7 @@ class TranslatorConfig {
         thinking: json['thinking'] as bool? ?? false,
         thinkingEffort: json['thinkingEffort'] as String? ?? 'high',
         translationGuide: json['translationGuide'] as String? ?? '',
+        batchReview: json['batchReview'] as bool? ?? true,
       );
 }
 

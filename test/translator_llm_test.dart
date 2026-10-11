@@ -51,8 +51,10 @@ void main() {
 
   test('translation guide survives save/load and old settings remain valid', () {
     expect(TranslatorConfig.fromJson({}).translationGuide, '');
-    final config = TranslatorConfig(translationGuide: '人名：Alice → 爱丽丝');
+    expect(TranslatorConfig.fromJson({}).batchReview, isTrue);
+    final config = TranslatorConfig(translationGuide: '人名：Alice → 爱丽丝', batchReview: false);
     expect(TranslatorConfig.fromJson(config.toJson()).translationGuide,
         config.translationGuide);
+    expect(TranslatorConfig.fromJson(config.toJson()).batchReview, isFalse);
   });
 }

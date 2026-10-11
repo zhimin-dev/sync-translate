@@ -25,7 +25,9 @@ class BatchSubtitleService {
       final data = jsonDecode(utf8.decode(response.bodyBytes));
       final capabilities = data is Map ? data['capabilities'] : null;
       if (capabilities is List &&
-          capabilities.contains('context_translation_v1')) return;
+          capabilities.contains('context_translation_v1') &&
+          (!translator.batchReview ||
+              capabilities.contains('translation_review_v1'))) return;
     }
     throw Exception('本地字幕服务版本过旧，请重启 whisper_server.py 后再翻译，'
         '以确保使用所选 AI 模型。');
@@ -131,6 +133,8 @@ class BatchItem {
   String? origSrtPath;
   String? error;
   String? warning;
+  String? translationEngine;
+  String? translationModel;
   double? duration;
 
   String get fileName => path.split(RegExp(r'[\\/]')).last;

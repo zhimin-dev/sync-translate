@@ -153,6 +153,8 @@ class _BatchViewState extends State<BatchView> {
         item.origSrtPath = s['orig_srt_path'] as String?;
         item.error = s['error'] as String?;
         item.warning = s['warning'] as String?;
+        item.translationEngine = s['translation_engine'] as String?;
+        item.translationModel = s['translation_model'] as String?;
         item.duration = (s['duration'] as num?)?.toDouble();
         anyUpdate = true;
       } catch (_) {
@@ -310,6 +312,15 @@ class _BatchViewState extends State<BatchView> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
+            if (item.translationEngine != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                '本任务引擎：${item.translationEngine} · '
+                '模型${item.translationEngine == 'llm' ? '（请求值）' : ''}：'
+                '${item.translationModel ?? '未知'}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
             if (item.done && item.srtPath != null) ...[
               const SizedBox(height: 4),
               Row(
@@ -358,7 +369,7 @@ class _BatchViewState extends State<BatchView> {
   Widget _batchStatusBadge(BatchItem item) {
     final (color, text) = switch (item.status) {
       '完成' => item.warning != null && item.warning!.isNotEmpty
-          ? (Colors.amberAccent, '完成（有待补译）')
+          ? (Colors.amberAccent, '完成（需复核）')
           : (Colors.greenAccent, '完成'),
       '失败' => (Colors.redAccent, '失败'),
       '排队中' => (Colors.orangeAccent, '排队中'),

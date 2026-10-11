@@ -57,6 +57,9 @@ class BatchTranslationTest(unittest.TestCase):
         job = self.client.get("/batch/status", params={"job_id": job_id}).json()
         self.assertEqual(job["status"], "完成")
         self.assertEqual(job["progress"], 1)
+        self.assertEqual(job["translation_engine"], "llm")
+        self.assertEqual(job["translation_model"], "selected-model")
+        self.assertFalse(job["translation_review"])
         output = Path(job["srt_path"]).read_text(encoding="utf-8")
         self.assertIn("00:00:01,250 --> 00:00:03,500\n译文 1", output)
         self.assertIn("00:00:05,000 --> 00:00:07,100\n译文 2", output)
@@ -115,6 +118,7 @@ class BatchTranslationTest(unittest.TestCase):
             self.server._batch_worker()
         ensure.assert_called_once()
         self.assertEqual(self.server.BATCH_JOBS[job_id]["status"], "完成")
+        self.assertEqual(self.server.BATCH_JOBS[job_id]["translation_engine"], "nllb_local")
         self.assertEqual(local_module.translate_text.call_count, 2)
         self.assertEqual(local_module.translate_text.call_args.args[1:], ("ja", "zh"))
 
@@ -123,6 +127,21 @@ class BatchTranslationTest(unittest.TestCase):
             "path": str(self.source), "translator": dict(CONFIG, model="")})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(self.server.BATCH_JOBS, {})
+
+    def test_review_warning_is_not_reported_as_untranslated_source(self):
+        job_id = self.submit(translator=dict(CONFIG, batchReview=True))
+        with patch.object(mt, "_chat", side_effect=[
+            '{"translations":[{"id":1,"text":"初译一"},{"id":2,"text":"初译二"}]}',
+            mt.TranslationError("review unavailable"),
+        ]):
+            self.server._batch_worker()
+        job = self.client.get("/batch/status", params={"job_id": job_id}).json()
+        self.assertEqual(job["status"], "完成")
+        self.assertTrue(job["translation_review"])
+        self.assertIn("保留初译", job["warning"])
+        self.assertNotIn("untranslated_indices", job)
+        self.assertNotIn("test-key", json.dumps(job))
+        self.assertIn("初译一", Path(job["srt_path"]).read_text(encoding="utf-8"))
 
     def test_empty_91st_cue_exports_complete_srt_with_warning(self):
         entries = subtitles(93)

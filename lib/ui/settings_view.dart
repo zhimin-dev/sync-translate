@@ -63,6 +63,7 @@ class _SettingsViewState extends State<SettingsView> {
   late String _trSourceLang = widget.config.translate.sourceLang;
   late String _trTargetLang = widget.config.translate.targetLang;
   late bool _trThinking = widget.config.translate.thinking;
+  late bool _trBatchReview = widget.config.translate.batchReview;
   late String _trThinkingEffort = widget.config.translate.thinkingEffort;
 
   // 模型选择状态（模型优先，运行方式随模型自动判定；自定义时手动选）
@@ -166,6 +167,7 @@ class _SettingsViewState extends State<SettingsView> {
       ..sourceLang = _trSourceLang
       ..targetLang = _trTargetLang
       ..thinking = _trThinking
+      ..batchReview = _trBatchReview
       ..thinkingEffort = _trThinkingEffort
       ..translationGuide = _trGuide.text.trim();
   }
@@ -415,6 +417,15 @@ class _SettingsViewState extends State<SettingsView> {
                         helperText: '用于实时和批量 AI 翻译；更换视频主题时请同步修改。',
                         border: OutlineInputBorder(),
                       ),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('批量字幕译后校对'),
+                      subtitle: const Text('初译后再对照原文检查漏译、跨行否定和表达；'
+                          '每段额外调用一次所选主模型，增加耗时和 API 费用。'),
+                      value: _trBatchReview,
+                      onChanged: (v) => setState(() => _trBatchReview = v),
                     ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,

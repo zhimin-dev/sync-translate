@@ -12,7 +12,7 @@ import subtitle_translation as mt
 
 CONFIG = {"engine": "llm", "baseUrl": "https://example.test/v1",
           "apiKey": "test-key", "model": "selected-model",
-          "translationGuide": "render → 渲染"}
+          "translationGuide": "render → 渲染", "batchReview": False}
 
 
 def subtitles(count=15):
@@ -42,7 +42,8 @@ class SubtitleTranslationTest(unittest.TestCase):
         self.assertEqual(first["following_context"], ["source 13", "source 14", "source 15"])
         self.assertEqual(len(second["previous_context"]), 6)
         self.assertEqual(second["previous_context"][-1],
-                         {"original": "source 12", "translation": "译文 12"})
+                         {"original": "source 12", "translation": "译文 12",
+                          "start": 27.5, "end": 29.5})
         self.assertIn("render → 渲染", chat.call_args_list[0].args[1][0]["content"])
         for i, item in enumerate(items):
             self.assertEqual(item["translation"], f"译文 {i + 1}")
@@ -70,6 +71,85 @@ class SubtitleTranslationTest(unittest.TestCase):
             mt.translate_subtitles(items, CONFIG, None, "zh")
         self.assertEqual(chat.call_count, 2)
         self.assertEqual([it["translation"] for it in items], ["一", "二"])
+
+    def test_review_has_original_draft_timing_and_cross_cue_rules(self):
+        items = subtitles(2)
+        items[0]["text"] = "基本的に燃えない物質ってのは"
+        items[1]["text"] = "ないんだよ"
+        draft = json.dumps({"translations": [{"id": 1, "text": "物质基本上都不燃烧"},
+                                              {"id": 2, "text": "没有啊"}]})
+        corrected = json.dumps({"translations": [{"id": 1, "text": "基本上没有什么物质"},
+                                                  {"id": 2, "text": "是不能燃烧的。"}]})
+        with patch.object(mt, "_chat", side_effect=[draft, corrected]) as chat:
+            mt.translate_subtitles(items, dict(CONFIG, batchReview=True), "ja", "zh")
+        self.assertEqual(chat.call_count, 2)
+        review_messages = chat.call_args.args[1]
+        payload = json.loads(review_messages[1]["content"])
+        self.assertEqual(payload["subtitles"][1]["text"], "ないんだよ")
+        self.assertEqual(payload["subtitles"][0]["start"], items[0]["start"])
+        self.assertEqual(payload["draft_translations"][0]["text"], "物质基本上都不燃烧")
+        self.assertIn("不要只润色草稿", review_messages[0]["content"])
+        self.assertEqual(items[1]["translation"], "是不能燃烧的。")
+
+    def test_review_failure_keeps_draft_and_continues_to_next_batch(self):
+        items = subtitles(13)
+        warning = Mock()
+        calls = 0
+
+        def chat(config, messages):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise mt.TranslationError("校对网络失败")
+            return reply(config, messages)
+
+        with patch.object(mt, "_chat", side_effect=chat):
+            mt.translate_subtitles(items, dict(CONFIG, batchReview=True), "ja", "zh",
+                                   on_quality_warning=warning)
+        self.assertEqual(calls, 4)
+        self.assertEqual(items[-1]["translation"], "译文 13")
+        self.assertEqual(warning.call_count, 1)
+        self.assertIn("保留初译", warning.call_args.args[1])
+
+    def test_review_invalid_ids_keep_draft(self):
+        items = subtitles(1)
+        warning = Mock()
+        with patch.object(mt, "_chat", side_effect=[
+            '{"translations":[{"id":1,"text":"初译"}]}',
+            '{"translations":[{"id":2,"text":"错位"}]}',
+        ]):
+            mt.translate_subtitles(items, dict(CONFIG, batchReview=True), "ja", "zh",
+                                   on_quality_warning=warning)
+        self.assertEqual(items[0]["translation"], "初译")
+        warning.assert_called_once()
+
+    def test_review_cannot_replace_clean_translation_with_repetition(self):
+        items = subtitles(1)
+        warning = Mock()
+        with patch.object(mt, "_chat", side_effect=[
+            '{"translations":[{"id":1,"text":"初译"}]}',
+            json.dumps({"translations": [{"id": 1, "text": "我没有过来" * 20}]}),
+        ]):
+            mt.translate_subtitles(items, dict(CONFIG, batchReview=True), "ja", "zh",
+                                   on_quality_warning=warning)
+        self.assertEqual(items[0]["translation"], "初译")
+        self.assertIn("已保留初译", warning.call_args.args[1])
+
+    def test_quality_signals_detect_sample_failures_without_trimming_text(self):
+        self.assertTrue(mt._quality_issues("燃えないゴミ", "燃烧不到的ゴミ", "zh"))
+        self.assertTrue(mt._quality_issues("早く分別しなさい", "我没有过来" * 20, "zh"))
+        self.assertEqual(mt._quality_issues("いやいやいや", "不不不", "zh"), [])
+        self.assertEqual(mt._quality_issues("えええええ", "えええええ", "ja"), [])
+        same = "正常重复" * 10
+        self.assertEqual(mt._quality_issues(same, same, "zh"), [])
+
+    def test_quality_warning_does_not_block_output(self):
+        items = subtitles(1)
+        warning = Mock()
+        with patch.object(mt, "_chat", return_value='{"translations":[{"id":1,"text":"ゴミ"}]}'):
+            mt.translate_subtitles(items, CONFIG, "ja", "zh", on_quality_warning=warning)
+        self.assertEqual(items[0]["translation"], "ゴミ")
+        self.assertEqual(warning.call_args.args[0], 1)
 
     def test_invalid_output_fails_instead_of_copying_source(self):
         items = subtitles(2)
